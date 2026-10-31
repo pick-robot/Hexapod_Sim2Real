@@ -126,9 +126,9 @@ class CableEndPitchSensor:
                 with self._lock:
                     deg_angle = float(angle)
                     # 标定角
-                    deg_angle = 159 - deg_angle
-                    #self._last_angle = deg_angle  # 直接使用角度值，单位为度
-                    self._last_angle = math.radians(deg_angle)  # 转换为弧度
+                    deg_angle = - deg_angle
+                    self._last_angle = deg_angle  # 直接使用角度值，单位为度
+                    #self._last_angle = math.radians(deg_angle)  # 转换为弧度
                     self._last_ts = time.time()
 
             time.sleep(self.poll_period)
@@ -155,7 +155,7 @@ class CableEndPitchSensor:
 
 
 if __name__ == "__main__":
-    CABLE_PITCH_SERIAL_PORT = "/dev/ttyUSB_pitch"
+    CABLE_PITCH_SERIAL_PORT = "/dev/ttyUSB0"
     
     sensor = CableEndPitchSensor(port=CABLE_PITCH_SERIAL_PORT, baudrate=115200)
     
@@ -165,7 +165,7 @@ if __name__ == "__main__":
             while True:
                 latest = sensor.get_angle()
                 if latest is not None:
-                    print(f"cable_end_pitch_angle = {latest:.6f} rad")
+                    print(f"cable_end_pitch_angle = {latest:.6f} deg")
                 time.sleep(0.1) # 模拟主控制循环抓取数据
         except KeyboardInterrupt:
             print("\n正在停止程序...")

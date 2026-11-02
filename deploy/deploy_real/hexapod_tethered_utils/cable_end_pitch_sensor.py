@@ -89,6 +89,11 @@ class CableEndPitchSensor:
         self.read_thread = None
         self.sensor = None
 
+    @staticmethod
+    def _wrap_to_pi(rad: float) -> float:
+        """把角度 wrap 到 [-pi, pi) 以避免 0/2pi 越程突变。"""
+        return (float(rad) + math.pi) % (2.0 * math.pi) - math.pi
+
     def start(self) -> bool:
         try:
             self.sensor = AbsoluteAngleSensor(
@@ -124,11 +129,9 @@ class CableEndPitchSensor:
 
             if angle is not None:
                 with self._lock:
-                    deg_angle = float(angle)
-                    # 标定角
-                    deg_angle = - deg_angle
-                    self._last_angle = deg_angle  # 直接使用角度值，单位为度
-                    #self._last_angle = math.radians(deg_angle)  # 转换为弧度
+                    # 以 34 度的传感器读数为 pitch 零位。
+                    pitch_rad = math.radians(34.0 - float(angle))
+                    self._last_angle = self._wrap_to_pi(pitch_rad)
                     self._last_ts = time.time()
 
             time.sleep(self.poll_period)
@@ -165,7 +168,7 @@ if __name__ == "__main__":
             while True:
                 latest = sensor.get_angle()
                 if latest is not None:
-                    print(f"cable_end_pitch_angle = {latest:.6f} deg")
+                    print(f"cable_end_pitch_angle = {latest:.6f} rad")
                 time.sleep(0.1) # 模拟主控制循环抓取数据
         except KeyboardInterrupt:
             print("\n正在停止程序...")

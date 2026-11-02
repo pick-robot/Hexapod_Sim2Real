@@ -118,7 +118,7 @@ class CableArmYawSensor:
         """
         if yaw_value is None or not math.isfinite(float(yaw_value)):
             return None
-        reversed_degrees = (360.0 - float(yaw_value)) % 360.0
+        reversed_degrees = (float(yaw_value)) % 360.0
         yaw_radians = math.radians(reversed_degrees)
         return self._wrap_to_pi(yaw_radians + float(offset_rad))
         
@@ -171,12 +171,13 @@ if __name__ == "__main__":
         try:
             while True:
                 ang = sensor.get_angle()
-                yaw = sensor.get_body_fixed_yaw(ang, 5.8008)
+                print(f"cable_arm_yaw_angle = {ang:.6f} deg") if ang is not None else print("cable_arm_yaw_angle = None")
+                yaw = sensor.get_body_fixed_yaw(ang, -5.288)  # 假设偏置为 0.0 弧度
+                if yaw is not None:
+                    print(f"Arm Body Fixed Yaw = {yaw:.4f} 弧度")
                 #differ_angle = sensor.get_yaw_angle(0.44,ang, 5.8008)
                 # if ang is not None:
                 #     print(f"Arm Yaw Angle = {ang:.4f} 度")          
-                if yaw is not None:
-                    print(f"Arm Body Fixed Yaw = {yaw:.4f} 弧度")
                 # if differ_angle is not None:
                 #     print(f"Arm differ Yaw Angle = {differ_angle:.4f} 度")
                 time.sleep(0.1)

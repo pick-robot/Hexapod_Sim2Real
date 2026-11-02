@@ -36,7 +36,7 @@ class RL_Real_PySOEM_WithSpoolTorque(RL_Real_PySOEM):
         *,
         spool_motor_id: int = 19,
         spool_slave_idx: int = 3,
-        spool_passage: int = 1,
+        spool_passage: int = 2,
         spool_direction: float = 1.0,
     ):
         super().__init__(ifname)

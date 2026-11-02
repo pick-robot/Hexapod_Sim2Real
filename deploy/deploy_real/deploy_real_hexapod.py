@@ -5,7 +5,7 @@ import csv
 import os
 from datetime import datetime
 
-from imu_sdk_new.imu_sdk import IMUSDK
+from imu_sdk_deta40.imu_sdk import IMUSDK
 
 from common.command_helper_hexapod import create_zero_cmd,create_damping_cmd
 
@@ -84,7 +84,7 @@ class Controller:
         if not self.robot_start:
             print("[WARNING] Robot start failed. Will use zero data.")
 
-        self.imu = IMUSDK(port='/dev/ttyUSB0', baudrate=921600)
+        self.imu = IMUSDK(port='/dev/ttyUSB_imu', baudrate=921600)
         self.imu_started = self.imu.start()
         if not self.imu_started:
             print("[WARNING] IMU start failed. Will use zero data.")
@@ -256,6 +256,13 @@ class Controller:
             if g_norm > 1e-6:
                 gravity_orientation = gravity_orientation / g_norm
 
+        # Match the IMU vy correction used by the tethered deployment.
+        imu_vy = float(linvel[1])
+        linvel[1] = np.float32(
+            np.sign(imu_vy) * (abs(imu_vy) - 0.05)
+            if abs(imu_vy) > 0.1
+            else 0.0
+        )
 
         cmd = self.gamepad.get_command()
         

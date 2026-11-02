@@ -7,7 +7,7 @@
 - 你用手推机器人模拟运动：IMU 速度用于前馈，yaw 用于投影修正
 
 运行示例：
-  python deploy/deploy_real/deploy_only_cable.py \
+  python deploy/deploy_real/deploy_only_cable_torque.py \
 	--config deploy/deploy_real/configs/hexapod_tethered.yaml \
 	--tension-ref 80 \
 	--plot
@@ -98,7 +98,7 @@ class RealTimePlotter:
 			ax.legend(loc="upper right")
 
 			ax = self._axs[1]
-			(self._ln_yaw,) = ax.plot([], [], label="yaw_differ(rad)")
+			(self._ln_yaw,) = ax.plot([], [], label="tether_yaw(rad)")
 			ax.set_ylabel("Yaw")
 			ax.grid(True)
 			ax.legend(loc="upper right")
@@ -136,7 +136,7 @@ class RealTimePlotter:
 		t_s: float,
 		tension_meas: float,
 		tension_ref: float,
-		yaw_differ_rad: float,
+		tether_yaw_rad: float,
 		imu_vx: float,
 		spool_cmd_torque: float,
 		spool_vel_torque: float,
@@ -151,7 +151,7 @@ class RealTimePlotter:
 		self._t.append(float(t_s))
 		self._tension_meas.append(float(tension_meas))
 		self._tension_ref.append(float(tension_ref))
-		self._yaw.append(float(yaw_differ_rad))
+		self._yaw.append(float(tether_yaw_rad))
 		self._imu_vx.append(float(imu_vx))
 		self._spool_cmd_torque.append(float(spool_cmd_torque))
 		self._spool_vel_torque.append(float(spool_vel_torque))
@@ -202,7 +202,7 @@ class RealTimePlotter:
 class RuntimeState:
 	armed: bool = False
 	last_tension: float = float("nan")
-	last_yaw_differ: float = 0.0
+	last_tether_yaw: float = 0.0
 	last_imu_vx: float = 0.0
 
 
@@ -225,7 +225,7 @@ def build_argparser() -> argparse.ArgumentParser:
 		default=f"{config_hexapod_tethered.ROOT_DIR}/deploy/deploy_real/configs/hexapod_tethered.yaml",
 		help="YAML config path (uses speed_sign/k_p/ff/etc)",
 	)
-	p.add_argument("--ifname", type=str, default="enp86s0", help="EtherCAT NIC name")
+	p.add_argument("--ifname", type=str, default="enp109s0", help="EtherCAT NIC name")
 	p.add_argument(
 		"--tension-ref",
 		type=float,
@@ -247,6 +247,14 @@ def build_argparser() -> argparse.ArgumentParser:
 		"--arm-with-gamepad",
 		action="store_true",
 		help="If gamepad exists, require A to arm and B to disarm",
+	)
+	p.add_argument(
+		"--allow-no-slave",
+		action="store_true",
+		help=(
+			"Continue without EtherCAT slaves for sensor/controller/plot checks; "
+			"motor commands are not transmitted"
+		),
 	)
 	return p
 
@@ -284,9 +292,13 @@ def main() -> int:
 
 	# Logging
 	timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-	log_dir = os.path.join(os.getcwd(), f"cable_only_logs_{timestamp}")
+	log_dir = os.path.join(
+		os.path.dirname(os.path.abspath(__file__)),
+		"deploy_only_cable_data",
+		"torque",
+	)
 	os.makedirs(log_dir, exist_ok=True)
-	log_path = os.path.join(log_dir, "cable_only.csv")
+	log_path = os.path.join(log_dir, f"deploy_only_cable_torque_{timestamp}.csv")
 	log_f = open(log_path, "w", newline="")
 	log_w = csv.writer(log_f)
 	log_w.writerow(
@@ -295,7 +307,7 @@ def main() -> int:
 			"armed",
 			"tension_meas",
 			"tension_ref",
-			"yaw_differ_rad",
+			"tether_yaw_rad",
 			"imu_vx",
 			"spool_cmd_torque",
 			"spool_vel_torque",
@@ -340,10 +352,19 @@ def main() -> int:
 	create_damping_cmd(robot)
 	create_zero_torque_cmd(robot)
 
-	if not robot.start():
-		print("[CableOnly][ERROR] EtherCAT start failed.")
-		log_f.close()
-		return 1
+	ethercat_started = bool(robot.start())
+	if not ethercat_started:
+		if not args.allow_no_slave:
+			print(
+				"[CableOnly][ERROR] EtherCAT start failed. "
+				"Use --allow-no-slave only for a no-hardware inspection run."
+			)
+			log_f.close()
+			return 1
+		print(
+			"[CableOnly][NO-SLAVE MODE] Continuing without EtherCAT process data. "
+			"Spool state remains zero and motor commands are not transmitted."
+		)
 
 	imu = IMUSDK(port="/dev/ttyUSB_imu", baudrate=921600)
 	imu_started = bool(imu.start())
@@ -422,14 +443,13 @@ def main() -> int:
 
 			yaw_raw_deg = yaw_sensor.get_angle() if yaw_started else None
 			spool_pos_rad = float(robot.spool_state_buffer.position[0])
-			yaw_differ = yaw_sensor.get_yaw_angle(
-				motor_angle_deg=spool_pos_rad,
+			tether_yaw = yaw_sensor.get_body_fixed_yaw(
 				yaw_value=yaw_raw_deg,
-				offset_deg=float(cfg.offset_deg),
+				offset_rad=float(cfg.offset_deg),
 			)
-			if yaw_differ is not None:
-				state.last_yaw_differ = float(yaw_differ)
-			yaw_differ_rad = float(state.last_yaw_differ)
+			if tether_yaw is not None:
+				state.last_tether_yaw = float(tether_yaw)
+			tether_yaw_rad = float(state.last_tether_yaw)
 
 			# Decide command
 			t=time.time()
@@ -445,7 +465,7 @@ def main() -> int:
 					speed_input=float(0),
 					#t=time.time(),
 					#speed_input=float(imu_vx),
-					yaw=float(yaw_differ_rad),
+					yaw=float(tether_yaw_rad),
 					#yaw=float(0),
 					tension_ref=float(tension_ref),
 					tension_meas=float(tension_meas),
@@ -457,7 +477,7 @@ def main() -> int:
 
 			robot.spool_command_buffer.target_torque_nm[0] = float(spool_cmd_torque)
 			spool_torque = 2.1 * float(robot.spool_state_buffer.torque[0])
-			print(f"feedback_torque:{feedback_torque},error:{float(error)}")
+			#print(f"feedback_torque:{feedback_torque},error:{float(error)}")
 			# print(imu_vx)
 			# Log + plot
 			t_s = time.time() - t0
@@ -467,7 +487,7 @@ def main() -> int:
 					int(state.armed),
 					_safe_float(tension_meas, float("nan")),
 					float(tension_ref),
-					float(yaw_differ_rad),
+					float(tether_yaw_rad),
 					float(imu_vx),
 					float(spool_cmd_torque),
 					float(spool_torque),
@@ -480,7 +500,7 @@ def main() -> int:
 				t_s=float(t_s),
 				tension_meas=_safe_float(tension_meas, 0.0),
 				tension_ref=float(tension_ref),
-				yaw_differ_rad=float(yaw_differ_rad),
+				tether_yaw_rad=float(tether_yaw_rad),
 				imu_vx=float(imu_vx),
 				spool_cmd_torque=float(spool_cmd_torque),
 				spool_vel_torque=float(spool_torque),
@@ -509,4 +529,3 @@ def main() -> int:
 
 if __name__ == "__main__":
 	raise SystemExit(main())
-

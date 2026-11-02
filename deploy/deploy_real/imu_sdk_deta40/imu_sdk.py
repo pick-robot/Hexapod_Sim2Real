@@ -40,6 +40,8 @@ IMU_LEN = 0x38  # 12 float32 values + one int64 timestamp = 56 bytes
 AHRS_LEN = 0x30  # 10 float32 values + one int64 timestamp = 48 bytes
 
 GRAVITY_MPS2 = 9.80665
+_BODY_X_VELOCITY_LIMIT_MPS = 0.8
+_BODY_Y_VELOCITY_LIMIT_MPS = 0.5
 
 
 def calc_crc8(data: bytes) -> int:
@@ -119,6 +121,24 @@ def _rotate_world_to_body(
 ) -> Tuple[float, float, float]:
     qw, qx, qy, qz = (float(value) for value in quaternion)
     return _rotate_body_to_world((qw, -qx, -qy, -qz), vector)
+
+
+def _limit_body_velocity(
+    velocity: Sequence[float],
+) -> Tuple[float, float, float]:
+    """Limit integrated velocity in the robot's FLU/FRD body x-y axes."""
+
+    return (
+        max(
+            -_BODY_X_VELOCITY_LIMIT_MPS,
+            min(_BODY_X_VELOCITY_LIMIT_MPS, float(velocity[0])),
+        ),
+        max(
+            -_BODY_Y_VELOCITY_LIMIT_MPS,
+            min(_BODY_Y_VELOCITY_LIMIT_MPS, float(velocity[1])),
+        ),
+        float(velocity[2]),
+    )
 
 
 class IMUSDK:
@@ -434,6 +454,7 @@ class IMUSDK:
             velocity_body_raw = _rotate_world_to_body(
                 self._quaternion_raw, self._velocity_world_raw
             )
+            velocity_body_raw = _limit_body_velocity(velocity_body_raw)
             return self._to_output_vector(velocity_body_raw)
 
     def get_gravity_acceleration(self) -> List[float]:
@@ -469,6 +490,7 @@ class IMUSDK:
             velocity_body_raw = _rotate_world_to_body(
                 self._quaternion_raw, self._velocity_world_raw
             )
+            velocity_body_raw = _limit_body_velocity(velocity_body_raw)
             return {
                 "running": bool(self.running),
                 "imu_valid": bool(self.valid_imu),
@@ -792,6 +814,18 @@ class IMUSDK:
             self._velocity_world_raw = [
                 value * scale for value in self._velocity_world_raw
             ]
+
+        # Apply the deployment limits in body axes, then rotate the limited
+        # state back to world coordinates so the integrator itself cannot wind
+        # up beyond the values returned to the policy.
+        velocity_body_raw = _limit_body_velocity(
+            _rotate_world_to_body(
+                self._quaternion_raw, self._velocity_world_raw
+            )
+        )
+        self._velocity_world_raw = list(
+            _rotate_body_to_world(self._quaternion_raw, velocity_body_raw)
+        )
 
     def _update_stationary_state_locked(
         self,

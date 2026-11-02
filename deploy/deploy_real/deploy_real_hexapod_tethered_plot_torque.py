@@ -4,8 +4,6 @@ import torch
 import csv
 import os
 from datetime import datetime
-from collections import deque
-from typing import Optional
 
 from imu_sdk_deta40.imu_sdk import IMUSDK
 
@@ -21,6 +19,9 @@ from hexapod_tethered_utils.joystick_reader import Gamepad
 from hexapod_tethered_utils.cable_tension_sensor import CableTensionSensor
 from hexapod_tethered_utils.cable_end_pitch_sensor import CableEndPitchSensor
 from hexapod_tethered_utils.cable_arm_yaw_sensor import CableArmYawSensor
+from hexapod_tethered_estimate_utils.observation import (
+    tether_direction_from_yaw_pitch,
+)
 
 
 import config_hexapod_tethered
@@ -28,196 +29,110 @@ import config_hexapod_tethered
 from config_hexapod_tethered import Config
 
 
-class RealTimePlotter:
-    def __init__(
-        self,
-        history_seconds: float = 20.0,
-        control_dt: float = 0.02,
-        plot_every_n: int = 5,
-        enabled: bool = True,
-        csv_enabled: bool = True,
-        csv_path: Optional[str] = None,
-        csv_flush_every_n: int = 50,
-    ) -> None:
-        # Plotting and CSV logging are decoupled: plotting may be disabled due to
-        # missing GUI backend, but CSV logging should still work.
-        self.enabled = bool(enabled)
-        self.csv_enabled = bool(csv_enabled)
+class TensionTrainingCsvLogger:
+    """Write the complete deployment state into one CSV row per control step."""
+
+    def __init__(self, directory: str, trajectory_id: str, control_dt: float,
+                 flush_every_n: int = 50) -> None:
+        os.makedirs(directory, exist_ok=True)
+        self.path = os.path.join(directory, f"{trajectory_id}.csv")
+        self.trajectory_id = trajectory_id
         self.control_dt = float(control_dt)
-        self.plot_every_n = max(int(plot_every_n), 1)
-        self._csv_flush_every_n = max(int(csv_flush_every_n), 1)
-
-        self._step = 0
-        self._ok = False
-        self._csv_ok = False
-        self._csv_file = None
-        self._csv_writer = None
-
-        self._maxlen = max(int(history_seconds / max(self.control_dt, 1e-6)), 10)
-        self._t = deque(maxlen=self._maxlen)
-        self._tension_meas = deque(maxlen=self._maxlen)
-        self._tension_ref = deque(maxlen=self._maxlen)
-        self._yaw = deque(maxlen=self._maxlen)
-        self._imu_vx = deque(maxlen=self._maxlen)
-        self._spool_cmd_torque = deque(maxlen=self._maxlen)
-        self._spool_torque_buf = deque(maxlen=self._maxlen)
-
-        # CSV logger (best-effort)
-        if self.csv_enabled:
+        self.flush_every_n = max(int(flush_every_n), 1)
+        self._rows = 0
+        self._file = open(self.path, "w", newline="", buffering=1024 * 1024)
+        sudo_uid = os.environ.get("SUDO_UID")
+        sudo_gid = os.environ.get("SUDO_GID")
+        if sudo_uid is not None and sudo_gid is not None:
             try:
-                if csv_path is None:
-                    csv_path = os.path.join(os.getcwd(), "plot_data.csv")
-                os.makedirs(os.path.dirname(os.path.abspath(csv_path)), exist_ok=True)
-                self._csv_file = open(csv_path, "w", newline="")
-                self._csv_writer = csv.writer(self._csv_file)
-                self._csv_writer.writerow(
-                    [
-                        "t_s",
-                        "tension_value",
-                        "target_tension",
-                        "yaw_differ_value",
-                        "imu_vx",
-                        "spool_torque_cmd",
-                        "spool_torque_buffer",
-                    ]
-                )
-                self._csv_ok = True
-                print(f"[PlotCSV] logging enabled: {csv_path}")
-            except Exception as e:
-                self._csv_ok = False
-                self.csv_enabled = False
-                print(f"[PlotCSV] disabled due to error: {e}")
+                os.chown(directory, int(sudo_uid), int(sudo_gid))
+                os.chown(self.path, int(sudo_uid), int(sudo_gid))
+            except (OSError, ValueError) as exc:
+                print(f"[PreTensionCSV][WARN] cannot restore log ownership: {exc}")
+        self._fieldnames = self._make_fieldnames()
+        self._writer = csv.DictWriter(self._file, fieldnames=self._fieldnames)
+        self._writer.writeheader()
+        print(f"[PreTensionCSV] logging enabled: {self.path}")
 
-        if not self.enabled:
-            return
+    @staticmethod
+    def _names(prefix: str, size: int):
+        return [f"{prefix}_{i}" for i in range(size)]
 
-        try:
-            import matplotlib.pyplot as plt  # type: ignore
+    @classmethod
+    def _make_fieldnames(cls):
+        scalar = [
+            "timestamp_ns", "trajectory_id", "sample_index", "control_dt_s",
+            "force_raw_n", "torque_actual_nm",
+            "torque_command_prev_nm", "torque_command_issued_nm",
+            "motor_position_rad", "force_reference_n",
+            "imu_valid", "tension_sensor_valid",
+            "saturation_flag", "emergency_flag", "data_valid_flag",
+        ]
+        vectors = []
+        for name, size in (
+            ("velocity_command", 3), ("policy_action", 18),
+            ("joint_position", 18), ("joint_velocity", 18),
+            ("body_gravity_vector", 3), ("body_angular_velocity", 3),
+            ("body_linear_velocity", 3),
+            ("body_linear_acceleration", 3),
+        ):
+            vectors.extend(cls._names(name, size))
+        return scalar + vectors
 
-            self._plt = plt
-            self._plt.ion()
+    @staticmethod
+    def _put_vector(row, prefix: str, value, size: int) -> None:
+        array = np.asarray(value, dtype=np.float64).reshape(-1)
+        if array.size != size:
+            raise ValueError(f"{prefix} must contain {size} values, got {array.size}")
+        for i, item in enumerate(array):
+            row[f"{prefix}_{i}"] = float(item)
 
-            self._fig, self._axs = self._plt.subplots(
-                4, 1, sharex=True, figsize=(10, 8), constrained_layout=True
-            )
-            self._fig.canvas.manager.set_window_title("Hexapod Real-time Debug")
-
-            # 1) tension
-            ax = self._axs[0]
-            (self._ln_tension_meas,) = ax.plot([], [], label="tension_value")
-            (self._ln_tension_ref,) = ax.plot([], [], label="target_tension")
-            ax.set_ylabel("Tension")
-            ax.grid(True)
-            ax.legend(loc="upper right")
-
-            # 2) yaw_differ
-            ax = self._axs[1]
-            (self._ln_yaw,) = ax.plot([], [], label="yaw_differ_value")
-            ax.set_ylabel("Yaw (rad)")
-            ax.grid(True)
-            ax.legend(loc="upper right")
-
-            # 3) imu vx
-            ax = self._axs[2]
-            (self._ln_imu_vx,) = ax.plot([], [], label="imu_vx")
-            ax.set_ylabel("IMU vx (m/s)")
-            ax.grid(True)
-            ax.legend(loc="upper right")
-
-            # 4) spool cmd torque + buffer torque
-            ax = self._axs[3]
-            (self._ln_spool_cmd,) = ax.plot([], [], label="spool_torque_cmd")
-            (self._ln_spool_torque_buf,) = ax.plot([], [], label="spool_torque_buffer")
-            ax.set_ylabel("Spool Torque (Nm)")
-            ax.set_xlabel("Time (s)")
-            ax.grid(True)
-            ax.legend(loc="upper right")
-
-            self._ok = True
-        except Exception as e:
-            self._ok = False
-            print(f"[Plot] disabled due to error: {e}")
+    def write(self, *, timestamp_ns: int, force_raw_n: float,
+              torque_actual_nm: float, torque_command_prev_nm: float,
+              torque_command_issued_nm: float, motor_position_rad: float,
+              force_reference_n: float, velocity_command, policy_action,
+              joint_position, joint_velocity, body_gravity_vector,
+              body_angular_velocity, body_linear_velocity,
+              body_linear_acceleration,
+              imu_valid: bool, tension_sensor_valid: bool,
+              saturation_flag: bool, emergency_flag: bool = False) -> None:
+        row = {
+            "timestamp_ns": int(timestamp_ns),
+            "trajectory_id": self.trajectory_id,
+            "sample_index": self._rows,
+            "control_dt_s": self.control_dt,
+            "force_raw_n": float(force_raw_n),
+            "torque_actual_nm": float(torque_actual_nm),
+            "torque_command_prev_nm": float(torque_command_prev_nm),
+            "torque_command_issued_nm": float(torque_command_issued_nm),
+            "motor_position_rad": float(motor_position_rad),
+            "force_reference_n": float(force_reference_n),
+            "imu_valid": int(imu_valid),
+            "tension_sensor_valid": int(tension_sensor_valid),
+            "saturation_flag": int(saturation_flag),
+            "emergency_flag": int(emergency_flag),
+            "data_valid_flag": int(imu_valid and tension_sensor_valid),
+        }
+        self._put_vector(row, "velocity_command", velocity_command, 3)
+        self._put_vector(row, "policy_action", policy_action, 18)
+        self._put_vector(row, "joint_position", joint_position, 18)
+        self._put_vector(row, "joint_velocity", joint_velocity, 18)
+        self._put_vector(row, "body_gravity_vector", body_gravity_vector, 3)
+        self._put_vector(row, "body_angular_velocity", body_angular_velocity, 3)
+        self._put_vector(row, "body_linear_velocity", body_linear_velocity, 3)
+        self._put_vector(
+            row, "body_linear_acceleration", body_linear_acceleration, 3
+        )
+        self._writer.writerow(row)
+        self._rows += 1
+        if self._rows % self.flush_every_n == 0:
+            self._file.flush()
 
     def close(self) -> None:
-        if self._csv_file is not None:
-            try:
-                self._csv_file.close()
-            except Exception:
-                pass
-            self._csv_file = None
-            self._csv_writer = None
-            self._csv_ok = False
-
-    def update(
-        self,
-        t_s: float,
-        tension_value: float,
-        target_tension: float,
-        yaw_differ_value: float,
-        imu_vx: float,
-        spool_torque_cmd: float,
-        spool_torque_buffer: float,
-    ) -> None:
-        self._step += 1
-
-        # Always append to CSV if enabled, even when plotting is disabled.
-        if self.csv_enabled and self._csv_ok and self._csv_writer is not None:
-            try:
-                self._csv_writer.writerow(
-                    [
-                        float(t_s),
-                        float(tension_value),
-                        float(target_tension),
-                        float(yaw_differ_value),
-                        float(imu_vx),
-                        float(spool_torque_cmd),
-                        float(spool_torque_buffer),
-                    ]
-                )
-                if (self._step % self._csv_flush_every_n) == 0 and self._csv_file is not None:
-                    self._csv_file.flush()
-            except Exception:
-                # Do not break the control loop due to IO issues.
-                self.csv_enabled = False
-                self._csv_ok = False
-
-        if not self.enabled or not self._ok:
-            return
-
-        self._t.append(float(t_s))
-        self._tension_meas.append(float(tension_value))
-        self._tension_ref.append(float(target_tension))
-        self._yaw.append(float(yaw_differ_value))
-        self._imu_vx.append(float(imu_vx))
-        self._spool_cmd_torque.append(float(spool_torque_cmd))
-        self._spool_torque_buf.append(float(spool_torque_buffer))
-
-        if (self._step % self.plot_every_n) != 0:
-            return
-
-        t = np.asarray(self._t, dtype=np.float32)
-        if t.size < 2:
-            return
-
-        self._ln_tension_meas.set_data(t, np.asarray(self._tension_meas, dtype=np.float32))
-        self._ln_tension_ref.set_data(t, np.asarray(self._tension_ref, dtype=np.float32))
-        self._ln_yaw.set_data(t, np.asarray(self._yaw, dtype=np.float32))
-        self._ln_imu_vx.set_data(t, np.asarray(self._imu_vx, dtype=np.float32))
-        self._ln_spool_cmd.set_data(t, np.asarray(self._spool_cmd_torque, dtype=np.float32))
-        self._ln_spool_torque_buf.set_data(t, np.asarray(self._spool_torque_buf, dtype=np.float32))
-
-        for ax in self._axs:
-            ax.relim()
-            ax.autoscale_view(scalex=True, scaley=True)
-
-        try:
-            self._fig.canvas.draw_idle()
-            self._fig.canvas.flush_events()
-            self._plt.pause(0.001)
-        except Exception:
-            # If GUI backend gets into a bad state, avoid blocking control loop.
-            self.enabled = False
-            print("[Plot] disabled (runtime GUI error)")
+        if self._file is not None:
+            self._file.flush()
+            self._file.close()
+            self._file = None
 
 
 class Controller:
@@ -256,28 +171,25 @@ class Controller:
         self.cmd = np.array([0, 0, 0],dtype=np.float32)
         self.counter = 0
 
-        # Create log directory with timestamp
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        self.log_dir = os.path.join(os.getcwd(), "motor_logs", f'motor_logs_{timestamp}')
+        # Keep each script and each process invocation in its own log directory.
+        self.script_name = os.path.splitext(os.path.basename(__file__))[0]
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        self.log_dir = os.path.join(
+            script_dir,
+            "data_logs",
+            self.script_name,
+            f"{self.script_name}_{timestamp}",
+        )
         os.makedirs(self.log_dir, exist_ok=True)
-
-        # Temporarily disable all runtime plotting in the control process.
-        # Constructing/updating RealTimePlotter would run Matplotlib GUI work on
-        # this same thread and can block the control loop for 100+ ms.
-        self.plotter = None
-        
-        # Open 18 CSV files for logging motor data
-        self.log_files = []
-        self.log_writers = []
-        for i in range(18):
-            motor_id = int(self.config.joint2motor_idx[i])
-            filepath = os.path.join(self.log_dir, f'motor_{motor_id:02d}_policy_idx_{i:02d}.csv')
-            log_file = open(filepath, 'w', newline='')
-            writer = csv.writer(log_file)
-            writer.writerow(['time_step', 'counter', 'target_pos', 'actual_pos', 'error', 'action'])
-            self.log_files.append(log_file)
-            self.log_writers.append(writer)
-            print(f'[Logging] Created {filepath}')
+        self.trajectory_id = f"{self.script_name}_trajectory_{timestamp}"
+        self.pre_tension_logger = TensionTrainingCsvLogger(
+            directory=self.log_dir,
+            trajectory_id=self.trajectory_id,
+            control_dt=float(self.config.control_dt),
+            flush_every_n=50,
+        )
+        self._previous_spool_torque_command_nm = 0.0
 
         # 电机初始化 EtherCAT（单 Master）：18 关节 PD + 额外 spool 速度电机 motor_id=19 (slave_idx=3, passage=1)
         # 这里的 'enp86s0' 就是网口名；如果你要换网口，改成你的实际 NIC。
@@ -334,18 +246,15 @@ class Controller:
             print("[WARNING] Yaw sensor start failed. Will use zero data.")
 
     def __del__(self):
-        # Close all log files
-        for i in range(18):
+        csv_logger = getattr(self, "pre_tension_logger", None)
+        if csv_logger is not None:
             try:
-                self.log_files[i].close()
-            except:
-                pass
-        if getattr(self, "plotter", None) is not None:
-            try:
-                self.plotter.close()
+                csv_logger.close()
             except Exception:
                 pass
-        print(f'[Logging] All log files saved to {self.log_dir}')
+        log_dir = getattr(self, "log_dir", None)
+        if log_dir is not None:
+            print(f'[Logging] CSV file saved to {log_dir}')
 
     def _build_policy_joint_gains(self):
         """Build kp/kd arrays aligned with policy joint indices.
@@ -367,13 +276,13 @@ class Controller:
             motor_id = int(self.config.joint2motor_idx[policy_idx])
             if motor_id in group1:
                 kp[policy_idx] = 100.0
-                kd[policy_idx] = 1.2
+                kd[policy_idx] = 3.0
             elif motor_id in group2:
                 kp[policy_idx] = 100.0
-                kd[policy_idx] = 1.2
+                kd[policy_idx] = 3.0
             elif motor_id in group3:
                 kp[policy_idx] = 100.0
-                kd[policy_idx] = 1.2
+                kd[policy_idx] = 3.0
             else:
                 unknown_motor_ids.append(motor_id)
 
@@ -495,60 +404,83 @@ class Controller:
     def print_pitch_angle(self):
         pitch_value = self.pitch_sensor.get_angle()
         if pitch_value is not None:
-            print(f"Pitch Angle: {pitch_value:.3f} degrees")
+            print(f"Pitch Angle: {pitch_value:.3f} rad")
         else:
             print("No pitch angle data available.")
 
-    def print_yaw_differ_angle(self):
-        self.spool_q[0] = self.robot.spool_state_buffer.position[0]
-        yaw_differ_value = self.yaw_sensor.get_yaw_angle(motor_angle_deg=self.spool_q[0], yaw_value=self.yaw_sensor.get_angle(), offset_deg=self.config.offset_deg)
-        if yaw_differ_value is not None:
-            print(self.spool_q[0])
-            print(self.yaw_sensor.get_angle())
-            print(f"Yaw Differ Angle: {yaw_differ_value:.3f} rad")
+    def print_yaw_angle(self):
+        yaw_value = self.yaw_sensor.get_angle()
+        tether_yaw = self.yaw_sensor.get_body_fixed_yaw(
+            yaw_value=yaw_value,
+            offset_rad=self.config.offset_deg,
+        )
+        if yaw_value is not None and tether_yaw is not None:
+            print(f"Yaw Sensor: {float(yaw_value):.3f} deg")
+            print(f"Policy Tether Yaw: {tether_yaw:.3f} rad")
         else:
-            print("No yaw differ angle data available.")
+            print("No yaw angle data available.")
 
     def run(self):
         if self.gamepad is None:
             raise RuntimeError("Gamepad is not available; cannot run control loop")
 
+        observation_timestamp_ns = time.monotonic_ns()
         self.counter += 1
         for i in range(18):
             self.qj[i] = self.robot.motor_state_buffer.position[i]
             self.dqj[i] = self.robot.motor_state_buffer.velocity[i]
 
         self.spool_q[0] = self.robot.spool_state_buffer.position[0]
+        spool_torque_actual_pre_action = float(self.robot.spool_state_buffer.torque[0])
         vel = self.imu.get_linear_velocity()
         imu_data = self.imu.get_imu_data()
         grav = self.imu.get_gravity_acceleration()
 
         tension_value = self.tension_sensor.get_cable_tension()
-        if tension_value is None:
+        tension_sensor_valid = tension_value is not None and np.isfinite(tension_value)
+        if not tension_sensor_valid:
             tension_value = 0.0
             
-        pitch_value = self.pitch_sensor.get_angle()
-        if pitch_value is None:
-            pitch_value = 0.0
+        pitch_radians = self.pitch_sensor.get_angle()
+        if pitch_radians is None or not np.isfinite(pitch_radians):
+            pitch_radians = 0.0
             
         yaw_value = self.yaw_sensor.get_angle()
-        if yaw_value is None:
-            yaw_value = 0.0
-
-        # 计算yaw差值（arm相对body的yaw角度），作为观测输入提供给策略网络
-        yaw_differ_value = self.yaw_sensor.get_yaw_angle(motor_angle_deg=self.spool_q[0], yaw_value=yaw_value, offset_deg=self.config.offset_deg)
-        yaw_differ_value = 0
-        if imu_data is None:
+        tether_yaw = self.yaw_sensor.get_body_fixed_yaw(
+            yaw_value=yaw_value,
+            offset_rad=self.config.offset_deg,
+        )
+        if tether_yaw is None or not np.isfinite(tether_yaw):
+            tether_yaw = 0.0
+        tether_direction_body = tether_direction_from_yaw_pitch(
+            float(0.0), float(0.0)
+        )
+        # tether_direction_body = tether_direction_from_yaw_pitch(
+        #     float(tether_yaw), float(pitch_radians)
+        # )
+        if imu_data is None or vel is None or grav is None:
             # 如果没有 IMU 数据，使用全 0
             linvel = np.zeros(3, dtype=np.float32)
             ang_vel = np.zeros(3, dtype=np.float32)
             gravity_orientation = np.array([0.0, 0.0, -1.0], dtype=np.float32)  # 假设重力向下
+            body_linear_acceleration = np.zeros(3, dtype=np.float32)
+            imu_valid = False
         else:
             linvel = np.asarray(vel, dtype=np.float32)
             ang_vel = np.asarray(
                 [imu_data['gyro_x'], imu_data['gyro_y'], imu_data['gyro_z']], dtype=np.float32
             )
             gravity_orientation = np.asarray(grav, dtype=np.float32)
+            body_linear_acceleration = np.asarray(
+                [imu_data['acc_x'], imu_data['acc_y'], imu_data['acc_z']],
+                dtype=np.float32,
+            )
+            imu_valid = bool(
+                np.all(np.isfinite(linvel))
+                and np.all(np.isfinite(ang_vel))
+                and np.all(np.isfinite(gravity_orientation))
+                and np.all(np.isfinite(body_linear_acceleration))
+            )
 
             # Match sim2sim convention: gravity is a unit vector in body frame.
             g_norm = float(np.linalg.norm(gravity_orientation))
@@ -578,23 +510,22 @@ class Controller:
         # Avoid printing at control rate (50Hz) since it can disturb timing.
         self.obs[64:67] = self.cmd * self.config.command_scale
         
-        self.obs[67] = np.float32(0)
-        #self.obs[67] = np.float32(tension_value)
-        self.obs[68] = np.float32(0)
-        #self.obs[68] = np.float32(yaw_differ_value)
-        self.obs[69] = np.float32(0.01)
-        #self.obs[69] = np.float32(pitch_value)
+        self.obs[67] = np.float32(max(float(tension_value), 0.0))
+        self.obs[68:71] = tether_direction_body
         obs_tensor = torch.from_numpy(self.obs).unsqueeze(0)
-        self.action = self.policy(obs_tensor).detach().numpy().squeeze()
+        with torch.no_grad():
+            action_tensor = self.policy(obs_tensor)
+        self.action = action_tensor.detach().cpu().numpy().squeeze().copy()
 
-        # Action clipping: joint actions limited to [-2, 2], cable action limited to [0, 1]
-        self.action[0:18] = np.clip(self.action[0:18], -10.0, 10.0)
-        self.action[18] = np.clip(self.action[18], 0.0, 2.0)
+        # Keep the raw output for the next last_action observation; only the
+        # hardware commands use the safety/actuator limits.
+        joint_action = np.clip(self.action[0:18], -10.0, 10.0)
+        cable_action = np.clip(self.action[18], 0.0, 2.0)
 
-        target_dof_pos = self.config.default_angles + self.action[0:18] * self.config.action_scale
+        target_dof_pos = self.config.default_angles + joint_action * self.config.action_scale
         # target_dof_pos = self.config.default_angles
         
-        target_tension = self.action[18] * self.config.tension_action_scale
+        target_tension = cable_action * self.config.tension_action_scale
 
         for i in range(18):
             q = target_dof_pos[i]
@@ -616,16 +547,6 @@ class Controller:
             # else:
             #     feedforward_torque = 0.0
 
-            # Log to CSV
-            self.log_writers[i].writerow([
-                self.counter * self.config.control_dt,  # time_step
-                self.counter,                            # counter
-                f'{q:.6f}',                              # target_pos
-                f'{actual_pos:.6f}',                     # actual_pos
-                f'{error:.6f}',                          # error
-                f'{self.action[i]:.6f}'                  # action
-            ])
-
             self.robot.motor_command_buffer.kp[i] = float(self._kp_policy[i])
             self.robot.motor_command_buffer.kd[i] = float(self._kd_policy[i])
             self.robot.motor_command_buffer.target_position[i] = q
@@ -646,14 +567,38 @@ class Controller:
         spool_torque_cmd,feedback_torque, rff_torque,error_tension = self.tension_torque_controller.step(
             speed_input=float(cmd[0]),
             #speed_input=float(linvel[0]),
-            yaw=float(yaw_differ_value),
+            yaw=float(tether_yaw),
             tension_ref=float(target_tension),
             tension_meas=float(tension_value),
         )
-        self.robot.spool_command_buffer.target_torque_nm[0] = float(0)
-        #self.robot.spool_command_buffer.target_torque_nm[0] = float(spool_torque_cmd)
+        self.robot.spool_command_buffer.target_torque_nm[0] = float(spool_torque_cmd)
         self.robot.spool_state_buffer.torque[0] = float(self.robot.spool_state_buffer.torque[0])  # Ensure torque is updated for next control step
-        spool_torque = self.robot.spool_state_buffer.torque[0]
+        torque_limit = float(self.config.tsc_torque_limit)
+        saturation_flag = abs(float(spool_torque_cmd)) >= max(
+            torque_limit - 1e-6, 0.0
+        )
+        self.pre_tension_logger.write(
+            timestamp_ns=observation_timestamp_ns,
+            force_raw_n=float(tension_value),
+            torque_actual_nm=spool_torque_actual_pre_action,
+            torque_command_prev_nm=float(self._previous_spool_torque_command_nm),
+            torque_command_issued_nm=float(spool_torque_cmd),
+            motor_position_rad=float(self.spool_q[0]),
+            force_reference_n=float(target_tension),
+            velocity_command=self.cmd * self.config.command_scale,
+            policy_action=self.action[:18] * float(self.config.action_scale),
+            joint_position=self.qj,
+            joint_velocity=self.dqj,
+            body_gravity_vector=gravity_orientation,
+            body_angular_velocity=ang_vel,
+            body_linear_velocity=linvel,
+            body_linear_acceleration=body_linear_acceleration,
+            imu_valid=imu_valid,
+            tension_sensor_valid=tension_sensor_valid,
+            saturation_flag=saturation_flag,
+            emergency_flag=False,
+        )
+        self._previous_spool_torque_command_nm = float(spool_torque_cmd)
         time.sleep(self.config.control_dt)
 
 
@@ -671,7 +616,7 @@ if __name__ == "__main__":
     controller.print_imu_data()
     controller.print_pitch_angle()
 
-    controller.print_yaw_differ_angle()
+    controller.print_yaw_angle()
 
     controller.zero_torque_state()
     enter_policy = controller.move_to_default_pos()

@@ -58,6 +58,14 @@ class TensionTrainingCsvLogger:
         self.flush_every_n = max(int(flush_every_n), 1)
         self._rows = 0
         self._file = open(self.path, "w", newline="", buffering=1024 * 1024)
+        sudo_uid = os.environ.get("SUDO_UID")
+        sudo_gid = os.environ.get("SUDO_GID")
+        if sudo_uid is not None and sudo_gid is not None:
+            try:
+                os.chown(directory, int(sudo_uid), int(sudo_gid))
+                os.chown(self.path, int(sudo_uid), int(sudo_gid))
+            except (OSError, ValueError) as exc:
+                print(f"[PreTensionCSV][WARN] cannot restore log ownership: {exc}")
         self._fieldnames = self._make_fieldnames()
         # 写入表头
         self._writer = csv.DictWriter(self._file, fieldnames=self._fieldnames)
@@ -141,6 +149,13 @@ class TensionTrainingCsvLogger:
         if self._rows % self.flush_every_n == 0:
             self._file.flush()
 
+    def start_new_trajectory(self, trajectory_id: str) -> None:
+        """Mark a new trajectory segment while keeping one physical CSV."""
+        if self._file is not None:
+            self._file.flush()
+        self.trajectory_id = trajectory_id
+        self._rows = 0
+
     def close(self) -> None:
         if self._file is not None:
             self._file.flush()
@@ -183,6 +198,8 @@ class Controller:
         self.dqj = np.zeros(config.num_leggeds_actions,dtype=np.float32)
         self.spool_q = np.zeros(1, dtype=np.float32)
         self.action = np.zeros(config.num_actions,dtype=np.float32)
+        # Previous policy-generated tension reference used by the next observation.
+        self.target_tension = np.float32(0.0)
         self.target_dof_pos = config.default_angles.copy()
         self.obs = np.zeros(config.num_obs,dtype=np.float32)
         self.cmd = np.array([0, 0, 0],dtype=np.float32)
@@ -212,17 +229,22 @@ class Controller:
         self._timing_warning_sequence = 0
         self._timing_warning_reported_sequence = 0
 
-        # Create log directory with timestamp
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        self.log_dir = os.path.join(os.getcwd(), "motor_logs", f'motor_logs_{timestamp}')
+        # Keep each script and each process invocation in its own log directory.
+        self.script_name = os.path.splitext(os.path.basename(__file__))[0]
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        self.log_dir = os.path.join(
+            script_dir,
+            "data_logs",
+            self.script_name,
+            f"{self.script_name}_{timestamp}",
+        )
         os.makedirs(self.log_dir, exist_ok=True)
 
-        # Predictor-training data is kept separately from motor debug logs.
-        # One process invocation is one independent trajectory.
-        self.trajectory_id = f"hexapod_{timestamp}"
-        pre_data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pre_data")
+        # This comprehensive CSV is the only data file created for this run.
+        self.trajectory_id = f"{self.script_name}_trajectory_{timestamp}"
         self.pre_tension_logger = TensionTrainingCsvLogger(
-            directory=pre_data_dir,
+            directory=self.log_dir,
             trajectory_id=self.trajectory_id,
             control_dt=float(self.config.control_dt),
             flush_every_n=50,
@@ -230,19 +252,6 @@ class Controller:
         # This is u_{k-1} at the next call to run().  It is deliberately not
         # overwritten until the complete pre-action row has been written.
         self._previous_spool_torque_command_nm = 0.0
-
-        # Open 18 CSV files for logging motor data
-        self.log_files = []
-        self.log_writers = []
-        for i in range(18):
-            motor_id = int(self.config.joint2motor_idx[i])
-            filepath = os.path.join(self.log_dir, f'motor_{motor_id:02d}_policy_idx_{i:02d}.csv')
-            log_file = open(filepath, 'w', newline='', buffering=1024 * 1024)
-            writer = csv.writer(log_file)
-            writer.writerow(['time_step', 'counter', 'target_pos', 'actual_pos', 'error', 'action'])
-            self.log_files.append(log_file)
-            self.log_writers.append(writer)
-            print(f'[Logging] Created {filepath}')
 
         # 电机初始化 EtherCAT（单 Master）：18 关节 PD + 额外 spool 速度电机 motor_id=19 (slave_idx=3, passage=1)
         # 这里的 'enp86s0' 就是网口名；如果你要换网口，改成你的实际 NIC。
@@ -299,12 +308,6 @@ class Controller:
             print("[WARNING] Yaw sensor start failed. Will use zero data.")
 
     def __del__(self):
-        # Close all log files
-        for log_file in getattr(self, "log_files", []):
-            try:
-                log_file.close()
-            except Exception:
-                pass
         if getattr(self, "pre_tension_logger", None) is not None:
             try:
                 self.pre_tension_logger.close()
@@ -312,7 +315,7 @@ class Controller:
                 pass
         log_dir = getattr(self, "log_dir", None)
         if log_dir is not None:
-            print(f'[Logging] All log files saved to {log_dir}')
+            print(f'[Logging] CSV file saved to {log_dir}')
 
     def _wait_for_control_tick(self) -> int:
         """Wait until the next 50 Hz observation time and update timing QA."""
@@ -364,23 +367,13 @@ class Controller:
         )
 
     def start_new_training_trajectory(self) -> None:
-        """Start a fresh CSV after a blocking pause/state transition."""
-        if getattr(self, "pre_tension_logger", None) is not None:
-            self.pre_tension_logger.close()
-
+        """Start a new trajectory segment in the current run CSV."""
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
-        self.trajectory_id = f"hexapod_{timestamp}"
-        pre_data_dir = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "pre_data"
-        )
-        self.pre_tension_logger = TensionTrainingCsvLogger(
-            directory=pre_data_dir,
-            trajectory_id=self.trajectory_id,
-            control_dt=float(self.config.control_dt),
-            flush_every_n=50,
-        )
+        self.trajectory_id = f"{self.script_name}_trajectory_{timestamp}"
+        self.pre_tension_logger.start_new_trajectory(self.trajectory_id)
         # The spool is explicitly zeroed before this method is called.
         self._previous_spool_torque_command_nm = 0.0
+        self.target_tension = np.float32(0.0)
         self._next_cycle_start_ns = None
         self._last_observation_timestamp_ns = None
         self.timing_warning_message = None
@@ -433,6 +426,7 @@ class Controller:
         """Clear GRU history and last-action state before a policy run."""
         self.policy.reset()
         self.action.fill(0.0)
+        self.target_tension = np.float32(0.0)
 
 
     # 零力矩模式
@@ -595,9 +589,9 @@ class Controller:
         )
         if tether_yaw is None or not np.isfinite(tether_yaw):
             tether_yaw = 0.0
-        tether_direction_body = tether_direction_from_yaw_pitch(
-            float(tether_yaw), float(pitch_value)
-        )
+        # tether_direction_body = tether_direction_from_yaw_pitch(
+        #     float(tether_yaw), float(pitch_value)
+        # )
 
         tether_direction_body = tether_direction_from_yaw_pitch(
             float(0.0), float(0.0)
@@ -652,7 +646,7 @@ class Controller:
         dqj_obs = self.dqj.copy()
         dqj_obs = dqj_obs 
 
-        tension_value = float(0.0)
+        # tension_value = float(0.0)
 
         # Exact 68-D training order. Body linear velocity is estimated by the
         # GRU and therefore remains available only to logging below.
@@ -663,7 +657,8 @@ class Controller:
             dqj_obs * self.dof_vel_scale,
             self.action,
             self.cmd * self.config.command_scale,
-            max(float(tension_value), 0.0),
+            # max(float(tension_value), 0.0),
+            self.target_tension, # 不对0.0
             tether_direction_body,
         )
         self.action = self.policy.predict(self.obs)
@@ -681,6 +676,7 @@ class Controller:
         # target_dof_pos = self.config.default_angles
         
         target_tension = cable_action * self.config.tension_action_scale
+        self.target_tension = np.float32(target_tension)
 
         for i in range(18):
             q = target_dof_pos[i]
@@ -701,16 +697,6 @@ class Controller:
             #     feedforward_torque = 1.5 * motor_dir
             # else:
             #     feedforward_torque = 0.0
-
-            # Log to CSV
-            self.log_writers[i].writerow([
-                self.counter * self.config.control_dt,  # time_step
-                self.counter,                            # counter
-                f'{q:.6f}',                              # target_pos
-                f'{actual_pos:.6f}',                     # actual_pos
-                f'{error:.6f}',                          # error
-                f'{self.action[i]:.6f}'                  # action
-            ])
 
             self.robot.motor_command_buffer.kp[i] = float(self._kp_policy[i])
             self.robot.motor_command_buffer.kd[i] = float(self._kd_policy[i])
@@ -739,7 +725,7 @@ class Controller:
 
         self.robot.spool_command_buffer.target_torque_nm[0] = float(0.0)    
 
-        self.robot.spool_command_buffer.target_torque_nm[0] = float(spool_torque_cmd)
+        #self.robot.spool_command_buffer.target_torque_nm[0] = float(spool_torque_cmd)
         self.robot.spool_state_buffer.torque[0] = float(self.robot.spool_state_buffer.torque[0])  # Ensure torque is updated for next control step
         spool_torque = self.robot.spool_state_buffer.torque[0]
 
@@ -818,7 +804,6 @@ if __name__ == "__main__":
                 create_zero_torque_cmd(controller.robot)
                 # Do not put the blocking default-position pause and the
                 # resumed policy loop in the same training trajectory.
-                controller.pre_tension_logger.close()
                 if not controller.move_to_default_pos():
                     break
                 # 进入默认位置保持状态，A 恢复策略，LB 进入阻尼。

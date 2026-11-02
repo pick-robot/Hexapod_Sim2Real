@@ -20,7 +20,11 @@
 | --- | --- |
 | `deploy/deploy_real/` | 实机部署主程序、配置读取、数据记录和离线工具。 |
 | `deploy/deploy_real/configs/` | YAML 运行参数：策略路径、控制周期、观测/动作维度、电机映射、增益和绳控制参数。 |
-| `deploy/pre_train/` | 部署用 TorchScript 策略和张力预测模型。 |
+| `deploy/deploy_real/convert_to_jit/` | 将 RSL-RL/MJLab checkpoint 转换并校验为实机部署用 TorchScript 策略。 |
+| `deploy/deploy_real/data_logs/` | 绳驱整机实验的分程序、分时间戳 CSV 日志，以及离线生成的曲线图。 |
+| `deploy/deploy_real/deploy_only_cable_data/` | 单独调试绳轮时保存的速度/力矩控制 CSV 数据。 |
+| `deploy/deploy_real/pre_data/` | 张力预测训练使用的原始轨迹、合并数据和快速检查图。 |
+| `deploy/pre_train/` | 部署用 checkpoint 和 TorchScript 策略；可按训练批次建立日期/编号子目录。 |
 | `deploy/deploy_real/common/` | 安全指令、Unitree 遥控器解析和坐标旋转工具。 |
 | `deploy/deploy_real/motor_igh_sdk/` | EL4090 + PySOEM 电机通信及 PD/位置/速度/力矩控制封装。 |
 | `deploy/deploy_real/imu_sdk_deta40/` | 当前 DETA40/FDILink IMU 读取、坐标系转换和速度估计。 |
@@ -39,14 +43,15 @@
 | `deploy_real_hexapod_tethered_plot.py` | 基础速度式绳驱程序的绘图/日志版。 |
 | `deploy_real_hexapod_tethered_plot_torque.py` | 将绳轮改为力矩模式，记录并绘制张力、航向、速度和绳轮力矩。 |
 | `deploy_real_hexapod_tethered_plot_torque_data.py` | 力矩式部署加训练数据采集；以因果时序记录状态、上一步/当前力矩和绳张力，供 `pre_tension.py` 使用。 |
+| `deploy_real_hexapod_tethered_plot_torque_data_estimate.py` | 带 GRU 状态估计器的绳驱力矩部署/采集版；使用 estimate 策略并记录完整轨迹数据。 |
 | `deploy_real_hexapod_tethered_plot_torque_data_constant.py` | 恒定绳轮力矩对照版；当前代码把绳轮指令固定为 13.14 Nm，用于基线比较。 |
 | `deploy_real_hexapod_tethered_plot_torque_data_trex.py` | TReX 文献方法对照版；根据斜坡、摩擦和机器人速度生成确定性目标张力。 |
 | `deploy_real_hexapod_tethered_plot_torque_data_nagatani.py` | Nagatani 方法对照版；利用机器人姿态、绳方向和 MJCF 运动学计算目标张力。 |
 | `deploy_real_hexapod_tethered_plot_torque_data_polzin.py` | Polzin–Hughes 方法对照版；基于六足接触/支撑几何搜索可用拉力方向和大小。 |
 | `deploy_real_hexapod_tethered_plot_torque_data_moe.py` | 递归 MoE 策略部署版；使用 68 维观测、GRU 隐状态和多专家 actor，同时记录绳控制数据。 |
 | `deploy_real_hexapod_tethered_plot_torque_pre.py` | 短时域张力预测模型部署版；在候选绳轮力矩中选择预测张力更合适的指令，并保留 shadow/debug 数据。 |
-| `deploy_only_cable.py` | 不运行腿部策略，单独调试张力跟踪和绳轮速度控制。 |
-| `deploy_only_cable_torque.py` | 不运行腿部策略，单独调试张力跟踪和绳轮力矩控制。 |
+| `deploy_only_cable.py` | 不运行腿部策略，单独调试张力跟踪和绳轮速度控制，数据保存到 `deploy_only_cable_data/speed/`。 |
+| `deploy_only_cable_torque.py` | 不运行腿部策略，单独调试张力跟踪和绳轮力矩控制，数据保存到 `deploy_only_cable_data/torque/`。 |
 | `deploy_real.py` | 原 Unitree G1/H1/H1_2 通用部署入口，通过 DDS/SDK2 与原厂机器人通信。 |
 | `deploy_real_go2.py` | 原 Unitree Go2 部署入口，主要用于保留原工程参考。 |
 
@@ -67,16 +72,24 @@
 | 脚本 | 作用 |
 | --- | --- |
 | `convert_checkpoint_to_jit.py` | 从 RSL-RL checkpoint 重建 actor/观测归一化器，导出实机用 TorchScript policy。脚本内含固定输入/输出路径，使用前需检查。 |
+| `convert_mjlab_checkpoint_to_jit.py` | 从 MJLab 的 MLP actor checkpoint 重建归一化器和策略，导出并数值校验 TorchScript；当前指向 `hexapod_tethered/1015_1103`。 |
+| `convert_mjlab_hexapod_estimate_checkpoint_to_jit.py` | 从 MJLab GRU-estimator checkpoint 自动推断观测、隐状态、估计量和动作维度，导出带 `reset()` 的递归 TorchScript 并逐时序校验。 |
 | `convert_moe_checkpoint_to_jit.py` | 将 68 维双 GRU、6-expert MoE checkpoint 导出为实机部署用 recurrent TorchScript，并逐帧校验全部输出；输入和输出路径在脚本顶部配置，运行时无需传参。 |
 | `check_keys.py` | 打印 PyTorch checkpoint 的 key，检查 actor 和 observation normalizer 是否存在。当前模型路径在脚本内硬编码。 |
 | `test_load_model.py` | 加载/检查部署模型的小型测试脚本。 |
 | `plot_motor_curves.py` | 读取 `motor_logs_*` 中的 18 个电机 CSV，按 HAA/HFE/KFE 绘制目标位置和实际位置曲线。 |
+| `plot_tethered_data.py` | 读取一条绳驱综合 CSV，绘制实测/目标张力、前向速度指令和绳轮指令/实测力矩；在脚本顶部设置 `CSV_PATH`，图片保存到 CSV 同目录。 |
+| `plot_tethered_speed_data.py` | 读取绳轮速度模式综合 CSV，绘制张力、前向速度指令和绳轮指令/实测转速；在脚本顶部设置 `CSV_PATH`。 |
 | `replay_rear_leg_trajectory.py` | 在右后腿或左后腿重放已记录轨迹；其他关节保持阻尼，用于单腿跟踪试验。 |
 | `measure_cable_k.py` | 用逐步增加的绳轮力矩测量张力响应，保存到 `cable_data/K/`，用于识别绳系统参数。 |
 | `measure_cable_kc.py` | 通过绳轮位置模式采集张力—位置数据，保存到 `cable_data/K_C/`。 |
 | `generate_synthetic_pre_tension_data.py` | 生成确定性 50 Hz 合成 CSV，用于测试张力数据和训练流程；不能当作实机质量评估数据。 |
 | `merge_pre_tension_csv.py` | 校验并合并多条张力轨迹 CSV，保留 `trajectory_id`、时间戳和力矩因果顺序。 |
 | `pre_tension.py` | 检查张力 CSV，构造严格时序窗口，训练动作条件短时域张力预测模型。 |
+
+当前普通绳驱配置 `configs/hexapod_tethered.yaml` 使用 71 维观测，并加载 `deploy/pre_train/hexapod_tethered/1015_1103/policy_9500.pt`。同目录的 `model_9500.pt` 是原始 checkpoint，`policy_9500.pt` 是转换后的部署策略。
+
+运行数据按用途分开保存：整机绳驱脚本写入 `data_logs/<脚本名>/<脚本名_时间戳>/`，单绳脚本写入 `deploy_only_cable_data/speed/` 或 `deploy_only_cable_data/torque/`，张力预测训练轨迹集中在 `pre_data/`。这些目录中的时间戳 CSV/PNG 是实验产物，不需要逐个写入脚本索引。
 
 ## 4. 支持模块说明
 

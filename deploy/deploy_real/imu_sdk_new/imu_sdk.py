@@ -79,6 +79,8 @@ _LEVEL_GRAVITY_FLU: Vector3 = (0.0, 0.0, -1.0)
 _GRAVITY_MPS2 = 9.81
 _WORLD_GRAVITY_FLU_MPS2: Vector3 = (0.0, 0.0, -_GRAVITY_MPS2)
 _TIMESTAMP_STALL_LIMIT = 3
+_BODY_X_VELOCITY_LIMIT_MPS = 0.8
+_BODY_Y_VELOCITY_LIMIT_MPS = 0.5
 
 
 def calc_crc8(data: bytes) -> int:
@@ -128,6 +130,22 @@ def _all_finite(values: Iterable[float]) -> bool:
 
 def _norm(vector: Vector3) -> float:
     return math.sqrt(sum(value * value for value in vector))
+
+
+def _limit_body_velocity(velocity: Vector3) -> Vector3:
+    """Limit the integrated FLU body velocity used by deployment."""
+
+    return (
+        max(
+            -_BODY_X_VELOCITY_LIMIT_MPS,
+            min(_BODY_X_VELOCITY_LIMIT_MPS, velocity[0]),
+        ),
+        max(
+            -_BODY_Y_VELOCITY_LIMIT_MPS,
+            min(_BODY_Y_VELOCITY_LIMIT_MPS, velocity[1]),
+        ),
+        velocity[2],
+    )
 
 
 def _rotation_body_to_world(
@@ -977,8 +995,11 @@ class IMUSDK:
             ):
                 rotation = self._attitude_rotation_locked()
                 if rotation is not None:
-                    self._linear_velocity = _rotate_transpose(
-                        rotation, self._velocity_world
+                    self._linear_velocity = _limit_body_velocity(
+                        _rotate_transpose(rotation, self._velocity_world)
+                    )
+                    self._velocity_world = _rotate(
+                        rotation, self._linear_velocity
                     )
 
     def _policy_ready_locked(self, now: float) -> bool:
@@ -1384,10 +1405,10 @@ class IMUSDK:
             )
             self._last_estimator_update_monotonic = now
             return
-        self._velocity_world = next_velocity_world
-        self._linear_velocity = _rotate_transpose(
-            rotation, self._velocity_world
+        self._linear_velocity = _limit_body_velocity(
+            _rotate_transpose(rotation, next_velocity_world)
         )
+        self._velocity_world = _rotate(rotation, self._linear_velocity)
         self._velocity_valid = True
         self._velocity_estimator_error = None
 

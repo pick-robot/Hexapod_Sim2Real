@@ -6,13 +6,13 @@
 
 ## 1. 控制流程
 
-纯六足入口的基本状态机是：
+当前重点入口 `deploy_real_hexapod_estimate.py` 的基本状态机是：
 
 1. 启动后进入零力矩状态。
-2. 按 `Y` 运动到默认姿态。
+2. 按 `X` 运动到默认姿态。
 3. 按 `A` 进入策略控制。
 4. 策略运行或默认姿态等待期间按 `LB` 进入阻尼状态。
-5. 策略运行时按 `Y` 返回默认姿态，之后可按 `A` 继续策略，或按 `LB` 进入阻尼。
+5. 策略运行时按 `X` 返回默认姿态，之后可按 `A` 继续策略，或按 `LB` 进入阻尼。
 
 ## 2. 目录结构
 
@@ -38,6 +38,7 @@
 | 脚本 | 作用 |
 | --- | --- |
 | `deploy_real_hexapod.py` | 纯六足主程序；组装 66 维观测，调用 18 维策略，下发 18 个关节 PD 指令，并保存每个电机的跟踪日志。 |
+| `deploy_real_hexapod_estimate.py` | **纯六足 Estimate 主程序（当前重点入口）**；运行带 GRU 状态估计器的 MJLab 策略，以 63 维可观测状态在线估计机体线速度和 6 个足端高度，再输出 18 维关节动作。 |
 | `deploy_real_hexapod_tethered.py` | 基础绳驱入口；在腿部策略之外读取张力、绳端俯仰角和绳臂航向角，通过转速模式控制绳轮。 |
 | `deploy_real_hexapod_tethered_speed.py` | 带实时曲线和 CSV 日志的绳轮速度控制实验版。 |
 | `deploy_real_hexapod_tethered_plot.py` | 基础速度式绳驱程序的绘图/日志版。 |
@@ -60,14 +61,100 @@
 | 脚本 | 作用 |
 | --- | --- |
 | `config_hexapod.py` | 读取 `configs/hexapod.yaml`，提供纯六足策略、观测、动作和电机映射参数。 |
+| `config_hexapod_estimate.py` | 读取 `configs/hexapod_estimate.yaml`，提供 Estimate 策略路径、63 维观测、18 维动作、缩放系数和电机映射参数。 |
 | `config_hexapod_tethered.py` | 读取绳驱 YAML，除腿部参数外还包含绳轮速度/力矩控制器增益和限幅。 |
 | `config_hexapod_tethered_moe.py` | 在绳驱配置上增加 MoE/GRU 策略路径、观测合同和部署检查。 |
 | `config.py` | 原 G1/H1/H1_2 通用 YAML 读取器。 |
 | `config_go2.py` | 原 Go2 YAML 读取器。 |
 
-`configs/hexapod.yaml` 对应纯六足；`hexapod_tethered.yaml` 对应普通绳驱策略；`hexapod_tethered_moe.yaml` 对应 MoE 策略。`g1.yaml`、`go2.yaml`、`h1.yaml` 和 `h1_2.yaml` 为原 Unitree 机型配置。
+`configs/hexapod.yaml` 对应普通纯六足策略；`hexapod_estimate.yaml` 对应纯六足 Estimate 策略；`hexapod_tethered.yaml` 对应普通绳驱策略；`hexapod_tethered_estimate.yaml` 对应绳驱 Estimate 策略；`hexapod_tethered_moe.yaml` 对应 MoE 策略。`g1.yaml`、`go2.yaml`、`h1.yaml` 和 `h1_2.yaml` 为原 Unitree 机型配置。
 
-### 3.3 数据、模型与调试工具
+### 3.3 纯六足 Estimate 实机部署（重点）
+
+`deploy_real_hexapod_estimate.py` 用于部署带在线状态估计器的纯六足策略。它不再把 IMU 积分线速度直接放入 Actor 观测，而是让 GRU 根据连续的本体感知历史估计不可直接可靠测量的状态，因此该入口的模型结构、观测排列和 GRU 历史都必须与 MJLab 训练时完全一致。普通 66 维纯六足 MLP 策略不能用于这个入口。
+
+#### 策略数据流
+
+每个 20 ms 控制周期按以下顺序运行：
+
+1. 从 EtherCAT 读取 18 个关节的位置和速度，从 `imu_sdk_new` 读取机体角速度与单位重力方向，从 Xbox 手柄读取 `vx/vy/wz` 指令。
+2. 按训练顺序组装 63 维观测：`角速度(3) + 重力方向(3) + 相对关节位置(18) + 关节速度(18) + 上一步动作(18) + 速度指令(3)`。
+3. 观测先使用 checkpoint 中的均值和标准差归一化。GRU 使用前 60 维历史，输出 9 维估计量：`机体线速度(3) + 六个足端高度(6)`；速度指令的最后 3 维不进入 GRU。
+4. Actor 使用 `归一化后的 63 维观测 + 9 维估计量` 输出 18 维动作。主程序将动作限制到 `[-10, 10]`，再按 `目标关节角 = default_angles + action × action_scale` 下发关节 PD 指令。
+5. 当前配置为 50 Hz（`control_dt: 0.02`）、`action_scale: 0.25`；策略阶段关节增益为 `kp=100`、`kd=3`，移动/保持默认姿态时为 `kp=150`、`kd=11`。
+
+#### 63 维观测输入
+
+以下切片采用 Python 左闭右开规则，例如 `obs[0:3]` 表示索引 0、1、2。
+
+| Obs 范围 | 维度 | 输入内容 |
+| --- | ---: | --- |
+| `obs[0:3]` | 3 | IMU 机体角速度 `[ωx, ωy, ωz] × ang_vel_scale` |
+| `obs[3:6]` | 3 | IMU 计算的机体系单位重力方向 `[gx, gy, gz]` |
+| `obs[6:24]` | 18 | 相对关节位置 `(q - default_angles) × dof_pos_scale` |
+| `obs[24:42]` | 18 | 关节速度 `dq × dof_vel_scale` |
+| `obs[42:60]` | 18 | 上一个控制周期经 `[-10, 10]` 限幅后的策略动作 |
+| `obs[60:63]` | 3 | 手柄速度指令 `[vx, vy, wz] × command_scale` |
+
+18 个关节数据的固定顺序为 `RF → RM → RB → LF → LM → LB`，每条腿内部依次为 `HAA → HFE → KFE`。`obs[0:60]` 送入 GRU，用于估计机体线速度和六个足端高度；`obs[60:63]` 的速度指令不进入 GRU。完整 63 维观测与 GRU 输出的 9 维估计量拼接后送入 Actor。策略内部还会使用训练时保存的 observation mean/std 对观测归一化，因此不能调整这些输入的顺序。
+
+策略封装会根据文件内容自动识别两种模型：
+
+- MJLab 原始 `model_*.pt`：直接读取 `actor_state_dict`，并在部署端重建归一化器、GRU、估计头和 MLP Actor。
+- 转换后的 `policy_*.pt`：加载带 `reset()` 的递归 TorchScript。当前 `configs/hexapod_estimate.yaml` 默认使用 `deploy/pre_train/hexapod_estimate/1020_flat/policy_24500.pt`。
+
+网络启动时会预热 10 步并立即清空 GRU 历史；每次从默认姿态按 `A` 开始策略前，也会同时清空 GRU 历史和上一步动作，避免把预热或上一段运行的时序状态带入新一轮控制。
+
+#### 运行前配置
+
+重点检查 `configs/hexapod_estimate.yaml` 中的以下字段：
+
+| 字段 | 当前值/含义 |
+| --- | --- |
+| `policy_path` | Estimate 原始 checkpoint 或递归 TorchScript；不能填普通 Hexapod MLP 策略。 |
+| `control_dt` | `0.02` s，即 50 Hz。 |
+| `num_obs` / `num_actions` | 必须分别为 `63` / `18`。 |
+| `command_scale` | `[0.8, 0.5, 0.8]`，依次缩放 `vx/vy/wz`。 |
+| `action_scale` | `0.25`，将策略动作换算为目标关节角增量。 |
+| `joint2motor_idx` | 训练关节顺序到实机 motor ID 的映射。 |
+| `motor_directions` / `motor_offsets` | 电机安装方向和实机零位；必须使用本机标定结果。 |
+| `default_angles` | 进入策略前的默认关节姿态，当前 18 个值均为 0。 |
+
+> **重要：当前存在两处硬件配置来源。** Estimate 主程序从 `hexapod_estimate.yaml` 读取策略参数和 `joint2motor_idx`；但 `motor_igh_sdk/deploy_real_el4090_pysoem.py` 内部仍从 `hexapod_tethered.yaml` 读取实际收发使用的 `joint2motor_idx`、`motor_directions` 和 `motor_offsets`。运行前必须确认这两份 YAML 的三组电机参数完全一致，否则策略索引、反馈位置和下发目标可能错位。
+
+当前网卡名和 IMU 串口也不是命令行参数：
+
+- EtherCAT 网卡在 `deploy_real_hexapod_estimate.py` 中创建 `RL_Real_PySOEM('enp86s0')` 时固定；换机器后需先改为实际网卡名。
+- IMU 固定使用 `/dev/ttyUSB0`、`921600` baud。必须确认设备名、安装方向和角速度/重力坐标系与训练一致。
+- 脚本当前不解析 `{net_interface}` 命令行参数，不要照搬 `deploy_real.py enp3s0 config.yaml` 的调用方式。
+
+#### 启动命令与手柄状态机
+
+在仓库根目录运行：
+
+```bash
+sudo /home/lgl/anaconda3/envs/mujoco_rl/bin/python deploy/deploy_real/deploy_real_hexapod_estimate.py
+```
+
+启动顺序如下：
+
+1. 架起机器人并连接 EtherCAT、DETA40 IMU 和 Xbox 手柄；启动后检查终端中的策略预热、18 个日志文件、EtherCAT OP 状态、IMU 数据和初始关节位置。
+2. 零力矩状态按 `X`，程序用 2 s 从当前关节位置插值到 `default_angles`。
+3. 默认姿态保持状态按 `A`，清空递归状态后进入 Estimate 策略控制。
+4. 策略运行时按 `X` 返回默认姿态；随后可按 `A` 重新开始一段策略控制。
+5. 默认姿态等待或策略运行时按 `LB` 进入持续阻尼模式；最后按 `Ctrl+C` 完全退出。
+
+手柄按键编号取决于 Linux/SDL 驱动。默认映射和 `HEXAPOD_GAMEPAD_PRESET`、`HEXAPOD_GAMEPAD_BTN_*` 覆盖方式见 `hexapod_tethered_utils/joystick_reader.py`，上电前应先确认 `X/A/LB` 与摇杆方向。
+
+> **安全注意：** 当前程序在 EtherCAT 或 IMU 启动失败时只打印警告，并可能继续使用零反馈或安全默认 IMU 值，不会自动禁止进入策略。看到 `Robot start failed`、`IMU start failed`、EtherCAT 未进入 OP、IMU 数据不更新或关节初始位置异常时，不要按 `X/A`，应直接退出并排查。`LB` 进入阻尼后程序仍会持续下发阻尼指令，需要再次 `Ctrl+C` 才会结束进程。
+
+#### 日志与模型转换
+
+每次运行会在 `deploy/deploy_real/motor_logs/hexapod/motor_logs_<时间戳>/` 下创建 18 个 CSV。文件名同时包含 motor ID 和 policy index，每行记录时间、目标位置、实际位置、误差和策略动作，可使用 `plot_motor_curves.py` 绘制跟踪曲线。
+
+若要把新的 MJLab Estimate checkpoint 转为递归 TorchScript，使用 `deploy/deploy_real/convert_to_jit/convert_mjlab_hexapod_estimate_checkpoint_to_jit.py`。转换前检查脚本顶部的输入/输出路径；转换器会自动推断网络维度并用多步时序逐项比较原模型和导出模型。主入口也能直接加载结构匹配的原始 `model_*.pt`，但 TorchScript 更适合固定部署环境。
+
+### 3.4 数据、模型与调试工具
 
 | 脚本 | 作用 |
 | --- | --- |
@@ -106,7 +193,7 @@
 
 | 脚本 | 作用 |
 | --- | --- |
-| `joystick_reader.py` | 通过 Pygame 读取 Xbox 手柄，生成 `vx/vy/wz` 指令并提供 A/Y/LB 等按键状态。 |
+| `joystick_reader.py` | 通过 Pygame 读取 Xbox 手柄，生成 `vx/vy/wz` 指令并提供 A/X/LB 等按键状态。 |
 | `cable_tension_sensor.py` | 读取绳张力传感器，输出标定后的张力值。 |
 | `cable_tension_sensor_zero.py` | 张力传感器清零/零点标定脚本。 |
 | `cable_end_pitch_sensor.py` | 读取绳端俯仰角传感器。 |
@@ -166,6 +253,7 @@
 
 ## 6. 其他文档与自动生成代码
 
+- `README_LEGACY.md`：从根 README 迁出的旧版命令和注释。
 - `deploy/deploy_real/MOTOR_DEBUG_LOGGING_GUIDE.md`：电机 CSV 日志和曲线绘制说明。
 - `deploy/deploy_real/pre_data/README.md`：张力预测数据集说明。
 - `deploy/deploy_real/pre_data/plot.py`：预张力 CSV 数据的快速绘图检查脚本。
@@ -182,51 +270,3 @@
 - 带 `copy`、`test`、人名或文献名后缀的脚本主要用于对照实验，不要在未检查配置的情况下当作默认入口。
 
 ---
-
-## 原 README 内容（命令和注释完整保留）
-
-## 本项目是根据unitree go2机器人改的sim2real六足代码，目前只有hexapod是可以用的，hexapod_tethered还没有作出更改
-
-### configs文件夹中存放了yaml文件，在config_xxx中进行读取，deploy_real_hexapod.py中是真正的sim2real主程序
-
-
-### 执行sim2real的bash指令
-```bash
-sudo /home/lgl/anaconda3/envs/mujoco_rl/bin/python /home/lgl/Hexapod_Sim2Real/deploy/deploy_real/deploy_real_hexapod.py enp109s0
-```
-```bash
-sudo /home/hexapod/anaconda3/envs/hexapod_lgl/bin/python /home/hexapod/Hexapod_Sim2Real/deploy/deploy_real/deploy_real_hexapod_tethered.py enp86s0
-```
-
-```bash
-sudo /home/hexapod/anaconda3/envs/hexapod_lgl/bin/python /home/hexapod/Hexapod_Sim2Real/deploy/deploy_real/motor_igh_sdk/deploy_real_el4090_pysoem_spool_speed.py
-```
-udev
-```bash
-sudo nano /etc/udev/rules.d/99-usb-serial.rules
-```
-test yaw angle
-```bash
-sudo /home/hexapod/anaconda3/envs/hexapod_lgl/bin/python  /home/hexapod/Hexapod_Sim2Real/deploy/deploy_real/hexapod_tethered_utils/cable_arm_yaw_differ_test.py --ifname enp86s0 --motor-id 19 --slave-idx 3 --passage 1 --rpm 0 --current-limit-01a 500 --yaw-port /dev/ttyUSB_yaw --yaw-slave-id 1
-```
-
-```bash 
-sudo /home/hexapod/anaconda3/envs/hexapod_lgl/bin/python /home/hexapod/Hexapod_Sim2Real/deploy/deploy_real/deploy_only_cable.py --tension-ref 100 --plot --arm-with-gamepad 
-```
-
-```bash 
-sudo /home/hexapod/anaconda3/envs/hexapod_lgl/bin/python /home/hexapod/Hexapod_Sim2Real/deploy/deploy_real/deploy_only_cable_torque.py --tension-ref 50 --plot --arm-with-gamepad 
-```
-
-```bash
-sudo /home/hexapod/anaconda3/envs/hexapod_lgl/bin/python /home/hexapod/Hexapod_Sim2Real/deploy/deploy_real/motor_igh_sdk/deploy_real_el4090_pysoem_spool_torque.py
-```
-
-```bash 
-sudo /home/hexapod/anaconda3/envs/hexapod_lgl/bin/python /home/hexapod/Hexapod_Sim2Real/deploy/deploy_real/deploy_real_hexapod_tethered_speed.py enp86s0
-```
-
-#### deploy/deploy_real/deploy_real_hexapod_tethered_plot.py 和 /home/lgl/Hexapod_Sim2Real/deploy/deploy_real/deploy_real_hexapod_tethered_speed.py未必可以
-
-  pkill -TERM -x AskLink
-  /opt/AskLink/AskLink

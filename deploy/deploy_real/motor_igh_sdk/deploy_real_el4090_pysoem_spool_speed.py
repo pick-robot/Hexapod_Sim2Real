@@ -34,7 +34,7 @@ class RL_Real_PySOEM_WithSpoolSpeed(RL_Real_PySOEM):
         *,
         spool_motor_id: int = 19,
         spool_slave_idx: int = 3,
-        spool_passage: int = 2,
+        spool_passage: int = 4,
         spool_direction: float = 1.0,
     ):
         super().__init__(ifname)
@@ -47,7 +47,7 @@ class RL_Real_PySOEM_WithSpoolSpeed(RL_Real_PySOEM):
         # Speed-mode command/state buffers (match RL_Real_Speed_PySOEM style)
         self.spool_command_buffer = type("SpoolCommandBuffer", (), {})()
         self.spool_command_buffer.target_speed_rpm = [0.0]
-        self.spool_command_buffer.current_limit_01a = [600]  # 50.0A
+        self.spool_command_buffer.current_limit_01a = [50]  # 50.0A
         self.spool_command_buffer.ack_status = [1]
 
         self.spool_state_buffer = type("SpoolStateBuffer", (), {})()
@@ -127,7 +127,7 @@ if __name__ == "__main__":
 
     print(
         f"Launching RL_Real_PySOEM_WithSpoolSpeed on {ifname} "
-        f"(spool motor_id=19, slave_idx=3, passage=1), cmd_rpm={rpm}"
+        f"(spool motor_id=19, slave_idx=3, passage=2), cmd_rpm={rpm}"
     )
 
     robot = None
@@ -144,7 +144,7 @@ if __name__ == "__main__":
 
         # Spool speed command
         robot.spool_command_buffer.target_speed_rpm[0] = rpm
-        robot.spool_command_buffer.current_limit_01a[0] = 550
+        robot.spool_command_buffer.current_limit_01a[0] = 50
         robot.spool_command_buffer.ack_status[0] = 1
 
         if not robot.start():

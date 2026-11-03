@@ -45,7 +45,7 @@ class TensionTorqueControllerConfig:
     # Feedforward (paper-style):
     #   ff_rpm = (ff_max_rpm / ff_max_speed_mps) * (v_mps * cos(yaw)) / ff_radius_m
     ff_enabled: bool = False
-    ff_radius_m: float = 0.07
+    ff_radius_m: float = 0.06
 
     # Robustness / safety
     tension_deadband: float = 0.0

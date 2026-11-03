@@ -257,7 +257,7 @@ class Controller:
         # 这里的 'enp86s0' 就是网口名；如果你要换网口，改成你的实际 NIC。
         # Spool (cable) motor is fixed in this project:
         # motor_id=19 on slave_idx=3 passage=1, direction=+1.
-        self.robot = RL_Real_PySOEM_WithSpoolTorque('enp109s0')
+        self.robot = RL_Real_PySOEM_WithSpoolTorque('enp86s0')
         self.robot_start = self.robot.start()
         if not self.robot_start:
             print("[WARNING] Robot start failed. Will use zero data.")

@@ -87,7 +87,7 @@ estimate:
   cable_action_range: [0.0, 2.0]
 
 #offset_deg: -1.0485
-offset_deg: -2.2275
+offset_deg: -5.288
 #offset_deg: -1.9903
 #offset_deg: 3.3865
 # Optional: reference tension -> spool speed controller
@@ -120,7 +120,7 @@ k_i_backward_rpm_per_unit: 0.00
 ff_enabled: True
 ff_max_rpm: 157.0
 ff_max_speed_mps: 1.0
-ff_radius_m: 0.073
+ff_radius_m: 0.06
 
 Kff_forward: 1.0
 Kff_backward: 0.9
@@ -137,7 +137,7 @@ tension_lpf_alpha: 1.0
 
 
 # 0.4
-k_p_forward_rpm_per_unit_torque: 0.3
+k_p_forward_rpm_per_unit_torque: 0.01
 k_p_backward_rpm_per_unit_torque: 0.00
 
 k_d_forward_rpm_per_unit_torque: 0.00000

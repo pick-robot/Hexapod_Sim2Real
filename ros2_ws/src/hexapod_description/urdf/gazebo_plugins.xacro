@@ -1,0 +1,257 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <gazebo>
+    <plugin name="hexapod_joint_states" filename="libgazebo_ros_joint_state_publisher.so">
+      <update_rate>100</update_rate>
+      <joint_name>RF_HAA</joint_name>
+      <joint_name>RF_HFE</joint_name>
+      <joint_name>RF_KFE</joint_name>
+      <joint_name>RM_HAA</joint_name>
+      <joint_name>RM_HFE</joint_name>
+      <joint_name>RM_KFE</joint_name>
+      <joint_name>RB_HAA</joint_name>
+      <joint_name>RB_HFE</joint_name>
+      <joint_name>RB_KFE</joint_name>
+      <joint_name>LF_HAA</joint_name>
+      <joint_name>LF_HFE</joint_name>
+      <joint_name>LF_KFE</joint_name>
+      <joint_name>LM_HAA</joint_name>
+      <joint_name>LM_HFE</joint_name>
+      <joint_name>LM_KFE</joint_name>
+      <joint_name>LB_HAA</joint_name>
+      <joint_name>LB_HFE</joint_name>
+      <joint_name>LB_KFE</joint_name>
+    </plugin>
+  </gazebo>
+  <gazebo reference="trunk">
+    <sensor name="body_imu" type="imu">
+      <always_on>true</always_on>
+      <update_rate>200</update_rate>
+      <imu>
+        <angular_velocity>
+          <x>
+            <noise type="gaussian">
+              <mean>0</mean>
+              <stddev>0</stddev>
+            </noise>
+          </x>
+          <y>
+            <noise type="gaussian">
+              <mean>0</mean>
+              <stddev>0</stddev>
+            </noise>
+          </y>
+          <z>
+            <noise type="gaussian">
+              <mean>0</mean>
+              <stddev>0</stddev>
+            </noise>
+          </z>
+        </angular_velocity>
+        <linear_acceleration>
+          <x>
+            <noise type="gaussian">
+              <mean>0</mean>
+              <stddev>0</stddev>
+            </noise>
+          </x>
+          <y>
+            <noise type="gaussian">
+              <mean>0</mean>
+              <stddev>0</stddev>
+            </noise>
+          </y>
+          <z>
+            <noise type="gaussian">
+              <mean>0</mean>
+              <stddev>0</stddev>
+            </noise>
+          </z>
+        </linear_acceleration>
+      </imu>
+      <plugin name="hexapod_imu" filename="libgazebo_ros_imu_sensor.so">
+        <ros>
+          <remapping>~/out:=/imu/data</remapping>
+        </ros>
+        <frame_name>trunk</frame_name>
+        <initial_orientation_as_reference>false</initial_orientation_as_reference>
+      </plugin>
+    </sensor>
+  </gazebo>
+  <xacro:if value="$(arg use_ros2_control)">
+    <ros2_control name="HexapodGazeboSystem" type="system">
+      <hardware>
+        <plugin>gazebo_ros2_control/GazeboSystem</plugin>
+      </hardware>
+      <joint name="RF_HAA">
+        <command_interface name="effort">
+          <param name="min">${-joint_effort_limit}</param>
+          <param name="max">${joint_effort_limit}</param>
+        </command_interface>
+        <state_interface name="position" />
+        <state_interface name="velocity" />
+        <state_interface name="effort" />
+      </joint>
+      <joint name="RF_HFE">
+        <command_interface name="effort">
+          <param name="min">${-joint_effort_limit}</param>
+          <param name="max">${joint_effort_limit}</param>
+        </command_interface>
+        <state_interface name="position" />
+        <state_interface name="velocity" />
+        <state_interface name="effort" />
+      </joint>
+      <joint name="RF_KFE">
+        <command_interface name="effort">
+          <param name="min">${-joint_effort_limit}</param>
+          <param name="max">${joint_effort_limit}</param>
+        </command_interface>
+        <state_interface name="position" />
+        <state_interface name="velocity" />
+        <state_interface name="effort" />
+      </joint>
+      <joint name="RM_HAA">
+        <command_interface name="effort">
+          <param name="min">${-joint_effort_limit}</param>
+          <param name="max">${joint_effort_limit}</param>
+        </command_interface>
+        <state_interface name="position" />
+        <state_interface name="velocity" />
+        <state_interface name="effort" />
+      </joint>
+      <joint name="RM_HFE">
+        <command_interface name="effort">
+          <param name="min">${-joint_effort_limit}</param>
+          <param name="max">${joint_effort_limit}</param>
+        </command_interface>
+        <state_interface name="position" />
+        <state_interface name="velocity" />
+        <state_interface name="effort" />
+      </joint>
+      <joint name="RM_KFE">
+        <command_interface name="effort">
+          <param name="min">${-joint_effort_limit}</param>
+          <param name="max">${joint_effort_limit}</param>
+        </command_interface>
+        <state_interface name="position" />
+        <state_interface name="velocity" />
+        <state_interface name="effort" />
+      </joint>
+      <joint name="RB_HAA">
+        <command_interface name="effort">
+          <param name="min">${-joint_effort_limit}</param>
+          <param name="max">${joint_effort_limit}</param>
+        </command_interface>
+        <state_interface name="position" />
+        <state_interface name="velocity" />
+        <state_interface name="effort" />
+      </joint>
+      <joint name="RB_HFE">
+        <command_interface name="effort">
+          <param name="min">${-joint_effort_limit}</param>
+          <param name="max">${joint_effort_limit}</param>
+        </command_interface>
+        <state_interface name="position" />
+        <state_interface name="velocity" />
+        <state_interface name="effort" />
+      </joint>
+      <joint name="RB_KFE">
+        <command_interface name="effort">
+          <param name="min">${-joint_effort_limit}</param>
+          <param name="max">${joint_effort_limit}</param>
+        </command_interface>
+        <state_interface name="position" />
+        <state_interface name="velocity" />
+        <state_interface name="effort" />
+      </joint>
+      <joint name="LF_HAA">
+        <command_interface name="effort">
+          <param name="min">${-joint_effort_limit}</param>
+          <param name="max">${joint_effort_limit}</param>
+        </command_interface>
+        <state_interface name="position" />
+        <state_interface name="velocity" />
+        <state_interface name="effort" />
+      </joint>
+      <joint name="LF_HFE">
+        <command_interface name="effort">
+          <param name="min">${-joint_effort_limit}</param>
+          <param name="max">${joint_effort_limit}</param>
+        </command_interface>
+        <state_interface name="position" />
+        <state_interface name="velocity" />
+        <state_interface name="effort" />
+      </joint>
+      <joint name="LF_KFE">
+        <command_interface name="effort">
+          <param name="min">${-joint_effort_limit}</param>
+          <param name="max">${joint_effort_limit}</param>
+        </command_interface>
+        <state_interface name="position" />
+        <state_interface name="velocity" />
+        <state_interface name="effort" />
+      </joint>
+      <joint name="LM_HAA">
+        <command_interface name="effort">
+          <param name="min">${-joint_effort_limit}</param>
+          <param name="max">${joint_effort_limit}</param>
+        </command_interface>
+        <state_interface name="position" />
+        <state_interface name="velocity" />
+        <state_interface name="effort" />
+      </joint>
+      <joint name="LM_HFE">
+        <command_interface name="effort">
+          <param name="min">${-joint_effort_limit}</param>
+          <param name="max">${joint_effort_limit}</param>
+        </command_interface>
+        <state_interface name="position" />
+        <state_interface name="velocity" />
+        <state_interface name="effort" />
+      </joint>
+      <joint name="LM_KFE">
+        <command_interface name="effort">
+          <param name="min">${-joint_effort_limit}</param>
+          <param name="max">${joint_effort_limit}</param>
+        </command_interface>
+        <state_interface name="position" />
+        <state_interface name="velocity" />
+        <state_interface name="effort" />
+      </joint>
+      <joint name="LB_HAA">
+        <command_interface name="effort">
+          <param name="min">${-joint_effort_limit}</param>
+          <param name="max">${joint_effort_limit}</param>
+        </command_interface>
+        <state_interface name="position" />
+        <state_interface name="velocity" />
+        <state_interface name="effort" />
+      </joint>
+      <joint name="LB_HFE">
+        <command_interface name="effort">
+          <param name="min">${-joint_effort_limit}</param>
+          <param name="max">${joint_effort_limit}</param>
+        </command_interface>
+        <state_interface name="position" />
+        <state_interface name="velocity" />
+        <state_interface name="effort" />
+      </joint>
+      <joint name="LB_KFE">
+        <command_interface name="effort">
+          <param name="min">${-joint_effort_limit}</param>
+          <param name="max">${joint_effort_limit}</param>
+        </command_interface>
+        <state_interface name="position" />
+        <state_interface name="velocity" />
+        <state_interface name="effort" />
+      </joint>
+    </ros2_control>
+    <gazebo>
+      <plugin name="gazebo_ros2_control" filename="libgazebo_ros2_control.so">
+        <robot_param>robot_description</robot_param>
+        <robot_param_node>robot_state_publisher</robot_param_node>
+        <parameters>$(arg controllers_file)</parameters>
+      </plugin>
+    </gazebo>
+  </xacro:if>
+</robot>

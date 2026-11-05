@@ -1,0 +1,16 @@
+controller_manager:
+  ros__parameters:
+    # 每个 1 ms 物理步都从硬件状态计算 PD；策略仍是独立的 50 Hz。
+    update_rate: 1000
+    use_sim_time: true
+    hexapod_pd_controller:
+      type: hexapod_control/PdController
+
+hexapod_pd_controller:
+  ros__parameters:
+    joints: [RF_HAA, RF_HFE, RF_KFE, RM_HAA, RM_HFE, RM_KFE,
+             RB_HAA, RB_HFE, RB_KFE, LF_HAA, LF_HFE, LF_KFE,
+             LM_HAA, LM_HFE, LM_KFE, LB_HAA, LB_HFE, LB_KFE]
+    effort_limit: 30.0
+    command_timeout: 0.25
+    damping_kd: 11.0

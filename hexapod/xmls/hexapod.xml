@@ -1,0 +1,285 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mujoco model="hexapod">
+    <compiler angle="radian" meshdir="assets" autolimits="true" balanceinertia="true" />
+
+    <default>
+        <default class="hexapod">
+            <geom condim="1" contype="0" conaffinity="0" />
+            <joint axis="0 0 1" />
+
+            <default class="visual">
+                <geom type="mesh" contype="0" conaffinity="0" group="2" />
+            </default>
+
+            <default class="collision">
+                <geom group="3" contype="1" conaffinity="1" condim="3" solimp="0.9 0.95 0.02" />
+
+                <default class="trunk_cyl_1">
+                    <geom type="cylinder" size="0.06 0.38" pos="0 0.07 -0.2" quat="1 0 1 0" />
+                </default>
+                <default class="trunk_cyl_2">
+                    <geom type="cylinder" size="0.06 0.38" pos="0 -0.07 -0.2" quat="1 0 1 0" />
+                </default>
+
+                <default class="hip_capsule">
+                    <geom type="capsule" size="0.03" fromto="0 0 0 0 0 -0.03" />
+                </default>
+                <default class="thigh_capsule">
+                    <geom type="capsule" size="0.03" />
+                </default>
+                <default class="shank_capsule">
+                    <geom type="capsule" size="0.025" />
+                </default>
+            </default>
+
+            <default class="foot">
+                <geom type="sphere" size="0.023" solimp="0.9 0.95 0.023" condim="3" group="3" contype="1" conaffinity="1" />
+            </default>
+        </default>
+    </default>
+
+    <asset>
+        <mesh class="hexapod" name="BASE" file="BASE.STL" />
+        <mesh name="RF_HIP" file="RF_HIP.STL" />
+        <mesh name="RF_THIGH" file="RF_THIGH.STL" />
+        <mesh name="RF_SHANK" file="RF_SHANK.STL" />
+        <mesh name="RF_FOOT" file="RF_FOOT.STL" />
+        <mesh name="RM_HIP" file="RM_HIP.STL" />
+        <mesh name="RM_THIGH" file="RM_THIGH.STL" />
+        <mesh name="RM_SHANK" file="RM_SHANK.STL" />
+        <mesh name="RM_FOOT" file="RM_FOOT.STL" />
+        <mesh name="RB_HIP" file="RB_HIP.STL" />
+        <mesh name="RB_THIGH" file="RB_THIGH.STL" />
+        <mesh name="RB_SHANK" file="RB_SHANK.STL" />
+        <mesh name="RB_FOOT" file="RB_FOOT.STL" />
+        <mesh name="LF_HIP" file="LF_HIP.STL" />
+        <mesh name="LF_THIGH" file="LF_THIGH.STL" />
+        <mesh name="LF_SHANK" file="LF_SHANK.STL" />
+        <mesh name="LF_FOOT" file="LF_FOOT.STL" />
+        <mesh name="LM_HIP" file="LM_HIP.STL" />
+        <mesh name="LM_THIGH" file="LM_THIGH.STL" />
+        <mesh name="LM_SHANK" file="LM_SHANK.STL" />
+        <mesh name="LM_FOOT" file="LM_FOOT.STL" />
+        <mesh name="LB_HIP" file="LB_HIP.STL" />
+        <mesh name="LB_THIGH" file="LB_THIGH.STL" />
+        <mesh name="LB_SHANK" file="LB_SHANK.STL" />
+        <mesh name="LB_FOOT" file="LB_FOOT.STL" />
+    </asset>
+
+    <worldbody>
+        <light name="spotlight" mode="targetbodycom" target="trunk" pos="3 0 4" />
+        <body name="trunk" pos="0 0 0.3" childclass="hexapod">
+            <camera name="track" pos="1.2 -1.5 2.0" mode="trackcom" />
+            <!-- URDF link BASE; the body name stays "trunk" for the training API. -->
+            <inertial pos="-0.051 -0.01 0.02" mass="19.901" fullinertia="0.324 1.886 2.123 0.005 0.057 -0.001" />
+            <freejoint />
+
+            <geom class="visual" mesh="BASE" rgba="0.75294 0.75294 0.75294 1" />
+            <geom name="trunk_collision1" class="trunk_cyl_1" />
+            <geom name="trunk_collision2" class="trunk_cyl_2" />
+            <site name="imu" pos="0 0 0" group="5" />
+
+            <!-- ===== RF Leg ===== -->
+            <body name="RF_HIP" pos="0.45 -0.1 0.0495" quat="-2.597343466964615e-06 0.707105482506466 0.7071080798547033 -2.597353007557415e-06">
+                <inertial pos="-0.078 0.031 0.149" mass="1.411" fullinertia="0.002 0.002 0.003 0.001 0 0" />
+                <joint name="RF_HAA" pos="0 0 0" axis="0 0 1" limited="true" range="-0.8 0.8" />
+                <geom class="visual" mesh="RF_HIP" rgba="0.866667 0.909804 1 1" />
+                <geom name="RF_HIP_collision" class="hip_capsule" />
+                <site name="RF_HIP" pos="0 0 0" type="sphere" size="0.01" group="2" />
+
+                <body name="RF_THIGH" pos="-0.09 0.0795 0.154" quat="0.7071054825112363 -0.7071080798594735 0 0">
+                    <inertial pos="-0.022 0.010 -0.125" mass="1.286" fullinertia="0.002 0.005 0.004 0.002 0.001 -0.001" />
+                    <joint name="RF_HFE" pos="0 0 0" axis="0 0 -1" limited="true" range="-0.6 0.6" />
+                    <geom class="visual" mesh="RF_THIGH" rgba="1 1 1 1" />
+                    <geom name="RF_THIGH_collision" class="thigh_capsule" fromto="-0.00194196 0.00074608 -0.15419802 -0.00245089 0.00106907 -0.01982276" />
+
+                    <body name="RF_SHANK" pos="-0.1782 0.090798 -0.0685">
+                        <inertial pos="-0.001 -0.107 -0.011" mass="0.578" fullinertia="0.0044964 6.7098e-05 0.0045207 5.3153e-05 -1.1428e-08 -2.4178e-06" />
+                        <joint name="RF_KFE" pos="0 0 0" axis="0 0 -1" limited="true" range="-0.6 0.6" />
+                        <geom class="visual" mesh="RF_SHANK" rgba="0.752941 0.752941 0.752941 1" />
+                        <geom name="RF_SHANK_collision" class="shank_capsule" fromto="0.00034685 0.03006267 -0.0101862 -0.00330186 -0.24004598 -0.00869975" />
+                        <site name="RF_SHANK" pos="0 0 0" type="sphere" size="0.01" group="2" />
+
+                        <geom class="visual" pos="-0.0081826 -0.29917 -0.011107" mesh="RF_FOOT" rgba="0.501961 0.501961 0.752941 1" />
+                        <geom name="RF_foot_collision" class="foot" pos="-0.0081826 -0.276 -0.011107" rgba="0.501961 0.501961 0.752941 1" />
+                        <site name="RF" pos="-0.0081826 -0.276 -0.011107" type="sphere" group="0" />
+
+                        <!-- Fixed URDF link; visuals/collisions stay on SHANK to preserve the training contact model. -->
+                        <body name="RF_FOOT" pos="-0.0081826 -0.29917 -0.011107">
+                            <inertial pos="0.0031504903337603 0.0187638839574205 0.000250412469435801" mass="0.0652350471365656" fullinertia="1.21479534427067e-05 1.32089620990545e-05 1.43072768151951e-05 6.01498264007147e-08 -2.7952152885237e-08 9.55458698113225e-08" />
+                        </body>
+                    </body>
+                </body>
+            </body>
+
+            <!-- ===== RM Leg ===== -->
+            <body name="RM_HIP" pos="0 -0.2 0.0495" quat="-2.597343466964615e-06 0.707105482506466 0.7071080798547033 -2.597353007557415e-06">
+                <inertial pos="-0.078 -0.042 0.149" mass="1.411" fullinertia="0.002 0.002 0.003 -0.001 0 0" />
+                <joint name="RM_HAA" pos="0 0 0" axis="0 0 1" limited="true" range="-0.8 0.8" />
+                <geom class="visual" mesh="RM_HIP" rgba="1 1 1 1" />
+                <geom name="RM_HIP_collision" class="hip_capsule" />
+                <site name="RM_HIP" pos="0 0 0" type="sphere" size="0.01" group="2" />
+
+                <body name="RM_THIGH" pos="-0.09 0.0795 0.154" quat="0.7071054825112363 -0.7071080798594735 0 0">
+                    <inertial pos="-0.022 0.01 -0.045" mass="1.286" fullinertia="0.002 0.004 0.004 0.002 -0.001 0" />
+                    <joint name="RM_HFE" pos="0 0 0" axis="0 0 -1" limited="true" range="-0.6 0.6" />
+                    <geom class="visual" mesh="RM_THIGH" rgba="1 1 1 1" />
+                    <geom name="RM_THIGH_collision" class="thigh_capsule" fromto="-0.00194196 0.00074608 -0.15419802 -0.00245089 0.00106907 -0.01982276" />
+
+                    <body name="RM_SHANK" pos="-0.1782 0.090798 -0.0685">
+                        <inertial pos="-0.00122265540921052 -0.107332155640051 -0.0108827996779151" mass="0.577673514828141" fullinertia="0.00449636142962497 6.70982844119265e-05 0.00452066750610663 5.31534442939036e-05 -1.14279201092338e-08 -2.41776164816303e-06" />
+                        <joint name="RM_KFE" pos="0 0 0" axis="0 0 -1" limited="true" range="-0.6 0.6" />
+                        <geom class="visual" mesh="RM_SHANK" rgba="0.752941 0.752941 0.752941 1" />
+                        <geom name="RM_SHANK_collision" class="shank_capsule" fromto="0.00034685 0.03006267 -0.0101862 -0.00330186 -0.24004598 -0.00869975" />
+                        <site name="RM_SHANK" pos="0 0 0" type="sphere" size="0.01" group="2" />
+
+                        <geom class="visual" pos="-0.00818264 -0.299167 -0.0111074" mesh="RM_FOOT" rgba="0.501961 0.501961 0.752941 1" />
+                        <geom name="RM_foot_collision" class="foot" pos="-0.00818264 -0.276 -0.0111074" rgba="0.501961 0.501961 0.752941 1" />
+                        <site name="RM" pos="-0.00818264 -0.276 -0.0111074" type="sphere" group="0" />
+
+                        <body name="RM_FOOT" pos="-0.00818264076712594 -0.299166784541547 -0.0111073622335694">
+                            <inertial pos="0.00315050745146095 0.0187638697177974 0.000250453161413638" mass="0.0652348178450878" fullinertia="1.21479077971544e-05 1.32089245638991e-05 1.43072591990465e-05 6.01584074528569e-08 -2.79648715833422e-08 9.55662024543551e-08" />
+                        </body>
+                    </body>
+                </body>
+            </body>
+
+            <!-- ===== RB Leg ===== -->
+            <body name="RB_HIP" pos="-0.45 -0.1 0.0492" quat="-2.597343466964615e-06 0.707105482506466 0.7071080798547033 -2.597353007557415e-06">
+                <inertial pos="-0.078 -0.031 0.149" mass="1.411" fullinertia="0.002 0.002 0.003 -0.001 0 0" />
+                <joint name="RB_HAA" pos="0 0 0" axis="0 0 1" limited="true" range="-0.8 0.8" />
+                <geom class="visual" mesh="RB_HIP" rgba="1 1 1 1" />
+                <geom name="RB_HIP_collision" class="hip_capsule" />
+                <site name="RB_HIP" pos="0 0 0" type="sphere" size="0.01" group="2" />
+
+                <body name="RB_THIGH" pos="-0.09 0.0945 0.1537" quat="0.7071054825112363 -0.7071080798594735 0 0">
+                    <inertial pos="-0.022 0.01 -0.049" mass="1.286" fullinertia="0.002 0.005 0.004 0.002 -0.001 0.001" />
+                    <joint name="RB_HFE" pos="0 0 0" axis="0 0 -1" limited="true" range="-0.6 0.6" />
+                    <geom class="visual" mesh="RB_THIGH" rgba="1 1 1 1" />
+                    <geom name="RB_THIGH_collision" class="thigh_capsule" fromto="-0.00245555 0.00162696 -0.15435263 -0.00183728 0.00059283 -0.01961047" />
+
+                    <body name="RB_SHANK" pos="-0.1782 0.090798 -0.0835">
+                        <inertial pos="-0.00125500608314016 -0.107331782247017 -0.0111172003220849" mass="0.577673514828141" fullinertia="0.00449645483046401 6.70048835728804e-05 0.00452066750610663 4.91078712883112e-05 4.4379532497033e-08 2.41738131906602e-06" />
+                        <joint name="RB_KFE" pos="0 0 0" axis="0 0 1" limited="true" range="-0.6 0.6" />
+                        <geom class="visual" mesh="RB_SHANK" rgba="0.752941 0.752941 0.752941 1" />
+                        <geom name="RB_SHANK_collision" class="shank_capsule" fromto="0.00034712 0.03006266 -0.0118138 -0.00223952 -0.24005825 -0.01330025" />
+                        <site name="RB_SHANK" pos="0 0 0" type="sphere" size="0.01" group="2" />
+
+                        <geom class="visual" pos="0.00127539 -0.299276 -0.0108926" mesh="RB_FOOT" rgba="0.501961 0.501961 0.752941 1" />
+                        <geom name="RB_foot_collision" class="foot" pos="0.00127539 -0.276 -0.0108926" rgba="0.501961 0.501961 0.752941 1" />
+                        <site name="RB" pos="0.00127539 -0.276 -0.0108926" type="sphere" group="0" />
+
+                        <body name="RB_FOOT" pos="0.00127538595661916 -0.299275949540744 -0.0108926377664305">
+                            <inertial pos="-0.00271658099999497 0.0188315867457449 -0.000250448844782425" mass="0.0652348538555784" fullinertia="1.2151281102867e-05 1.32055889001146e-05 1.43072574928687e-05 -8.45710400772874e-08 -3.01755082389873e-08 -9.48720653283988e-08" />
+                        </body>
+                    </body>
+                </body>
+            </body>
+
+            <!-- ===== LF Leg ===== -->
+            <body name="LF_HIP" pos="0.45 0.1 0.0495" quat="0.7071054825112363 0 0 -0.7071080798594735">
+                <inertial pos="-0.078 0.031 -0.149" mass="1.411" fullinertia="0.002 0.002 0.003 0.001 0 0" />
+                <joint name="LF_HAA" pos="0 0 0" axis="0 0 -1" limited="true" range="-0.8 0.8" />
+                <geom class="visual" mesh="LF_HIP" rgba="1 1 1 1" />
+                <geom name="LF_HIP_collision" class="hip_capsule" />
+                <site name="LF_HIP" pos="0 0 0" type="sphere" size="0.01" group="2" />
+
+                <body name="LF_THIGH" pos="-0.09 0.0795 -0.154" quat="0.7071054825112363 0.7071080798594735 0 0">
+                    <inertial pos="-0.022 0.01 0.125" mass="1.286" fullinertia="0.002 0.005 0.004 0.002 -0.001 0.001" />
+                    <joint name="LF_HFE" pos="0 0 0" axis="0 0 1" limited="true" range="-0.6 0.6" />
+                    <geom class="visual" mesh="LF_THIGH" rgba="1 1 1 1" />
+                    <geom name="LF_THIGH_collision" class="thigh_capsule" fromto="-0.00247701 0.00163465 0.01966251 -0.00191381 0.00062783 0.15437317" />
+
+                    <body name="LF_SHANK" pos="-0.1782 0.090798 0.0685">
+                        <inertial pos="-0.00125500608314022 -0.107331782247018 0.0108827996779152" mass="0.577673514828143" fullinertia="0.00449645483046403 6.70048835728809e-05 0.00452066750610664 4.91078712883109e-05 4.43795324971021e-08 2.41738131906585e-06" />
+                        <joint name="LF_KFE" pos="0 0 0" axis="0 0 1" limited="true" range="-0.6 0.6" />
+                        <geom class="visual" mesh="LF_SHANK" rgba="0.752941 0.752941 0.752941 1" />
+                        <geom name="LF_SHANK_collision" class="shank_capsule" fromto="0.00034712 0.03006266 0.0101862 -0.00223952 -0.24005825 0.00869975" />
+                        <site name="LF_SHANK" pos="0 0 0" type="sphere" size="0.01" group="2" />
+
+                        <geom class="visual" pos="0.00127539 -0.299276 0.0111074" quat="0 0 1 0" mesh="LF_FOOT" rgba="0.501961 0.501961 0.752941 1" />
+                        <geom name="LF_foot_collision" class="foot" pos="0.00127539 -0.276 0.0111074" rgba="0.501961 0.501961 0.752941 1" />
+                        <site name="LF" pos="0.00127539 -0.276 0.0111074" type="sphere" group="0" />
+
+                        <body name="LF_FOOT" pos="0.00127538595661936 -0.299275949540744 0.0111073622335695" quat="0 0 1 0">
+                            <inertial pos="0.00271656736681947 0.0188315943234567 0.000250423430458835" mass="0.0652349946450809" fullinertia="1.21513086039564e-05 1.32056141029123e-05 1.43072682919343e-05 8.4564290411075e-08 -3.01642816343825e-08 9.48605110233161e-08" />
+                        </body>
+                    </body>
+                </body>
+            </body>
+
+            <!-- ===== LM Leg ===== -->
+            <body name="LM_HIP" pos="0 0.2 0.0495" quat="0.7071054825112363 0 0 -0.7071080798594735">
+                <inertial pos="-0.078 -0.042 -0.149" mass="1.411" fullinertia="0.002 0.002 0.003 -0.001 0 0" />
+                <joint name="LM_HAA" pos="0 0 0" axis="0 0 -1" limited="true" range="-0.8 0.8" />
+                <geom class="visual" mesh="LM_HIP" rgba="1 1 1 1" />
+                <geom name="LM_HIP_collision" class="hip_capsule" />
+                <site name="LM_HIP" pos="0 0 0" type="sphere" size="0.01" group="2" />
+
+                <body name="LM_THIGH" pos="-0.09 0.0795 -0.154" quat="0.7071054825112363 0.7071080798594735 0 0">
+                    <inertial pos="-0.022 0.01 0.045" mass="1.286" fullinertia="0.002 0.004 0.004 0.002 0.001 0" />
+                    <joint name="LM_HFE" pos="0 0 0" axis="0 0 1" limited="true" range="-0.6 0.6" />
+                    <geom class="visual" mesh="LM_THIGH" rgba="1 1 1 1" />
+                    <geom name="LM_THIGH_collision" class="thigh_capsule" fromto="-0.00247701 0.00163465 0.01966251 -0.00191381 0.00062783 0.15437317" />
+
+                    <body name="LM_SHANK" pos="-0.1782 0.090798 0.0685">
+                        <inertial pos="-0.00125500608314022 -0.107331782247017 0.0108827996779152" mass="0.577673514828143" fullinertia="0.00449645483046402 6.70048835728807e-05 0.00452066750610664 4.91078712883103e-05 4.43795324970615e-08 2.41738131906582e-06" />
+                        <joint name="LM_KFE" pos="0 0 0" axis="0 0 1" limited="true" range="-0.6 0.6" />
+                        <geom class="visual" mesh="LM_SHANK" rgba="0.752941 0.752941 0.752941 1" />
+                        <geom name="LM_SHANK_collision" class="shank_capsule" fromto="0.00034712 0.03006266 0.0101862 -0.00223952 -0.24005825 0.00869975" />
+                        <site name="LM_SHANK" pos="0 0 0" type="sphere" size="0.01" group="2" />
+
+                        <geom class="visual" pos="0.00127539 -0.299276 0.0111074" quat="0 0 1 0" mesh="LM_FOOT" rgba="0.501961 0.501961 0.752941 1" />
+                        <geom name="LM_foot_collision" class="foot" pos="0.00127539 -0.276 0.0111074" rgba="0.501961 0.501961 0.752941 1" />
+                        <site name="LM" pos="0.00127539 -0.276 0.0111074" type="sphere" group="0" />
+
+                        <body name="LM_FOOT" pos="0.00127538595661925 -0.299275949540744 0.0111073622335695" quat="0 0 1 0">
+                            <inertial pos="0.00271656361742079 0.0188316008407416 0.000250408389803666" mass="0.0652350820492717" fullinertia="1.21513263610223e-05 1.32056265753874e-05 1.43072753201107e-05 8.45621976063368e-08 -3.01624078329662e-08 9.48519249318531e-08" />
+                        </body>
+                    </body>
+                </body>
+            </body>
+
+            <!-- ===== LB Leg ===== -->
+            <body name="LB_HIP" pos="-0.45 0.1 0.0495" quat="0.7071054825112363 0 0 -0.7071080798594735">
+                <inertial pos="-0.078 -0.031 -0.149" mass="1.411" fullinertia="0.002 0.002 0.003 -0.001 0 0" />
+                <joint name="LB_HAA" pos="0 0 0" axis="0 0 -1" limited="true" range="-0.8 0.8" />
+                <geom class="visual" mesh="LB_HIP" rgba="1 1 1 1" />
+                <geom name="LB_HIP_collision" class="hip_capsule" />
+                <site name="LB_HIP" pos="0 0 0" type="sphere" size="0.01" group="2" />
+
+                <body name="LB_THIGH" pos="-0.09 0.0945 -0.154" quat="0.7071054825112363 0.7071080798594735 0 0">
+                    <inertial pos="-0.022 0.01 0.049" mass="1.286" fullinertia="0.002 0.005 0.004 0.002 0.001 -0.001" />
+                    <joint name="LB_HFE" pos="0 0 0" axis="0 0 1" limited="true" range="-0.6 0.6" />
+                    <geom class="visual" mesh="LB_THIGH" rgba="1 1 1 1" />
+                    <geom name="LB_THIGH_collision" class="thigh_capsule" fromto="-0.00194196 0.00074608 0.01980197 -0.00245089 0.00106907 0.15417724" />
+
+                    <body name="LB_SHANK" pos="-0.1782 0.090798 0.0835">
+                        <inertial pos="-0.00122265540921052 -0.107332155640051 0.0111172003220849" mass="0.577673514828144" fullinertia="0.00449636142962498 6.70982844119269e-05 0.00452066750610665 5.31534442939024e-05 -1.1427920109424e-08 -2.41776164816801e-06" />
+                        <joint name="LB_KFE" pos="0 0 0" axis="0 0 -1" limited="true" range="-0.6 0.6" />
+                        <geom class="visual" mesh="LB_SHANK" rgba="0.752941 0.752941 0.752941 1" />
+                        <geom name="LB_SHANK_collision" class="shank_capsule" fromto="0.00034685 0.03006267 0.0118138 -0.00330186 -0.24004598 0.01330025" />
+                        <site name="LB_SHANK" pos="0 0 0" type="sphere" size="0.01" group="2" />
+
+                        <geom class="visual" pos="-0.00818264 -0.299167 0.0108926" quat="0 0 1 0" mesh="LB_FOOT" rgba="0.501961 0.501961 0.752941 1" />
+                        <geom name="LB_foot_collision" class="foot" pos="-0.00818264 -0.276 0.0108926" rgba="0.501961 0.501961 0.752941 1" />
+                        <site name="LB" pos="-0.00818264 -0.276 0.0108926" type="sphere" group="0" />
+
+                        <body name="LB_FOOT" pos="-0.00818264076712605 -0.299166784541547 0.0108926377664312" quat="0 0 1 0">
+                            <inertial pos="-0.00315049033377091 0.0187638839574036 -0.000250412469440964" mass="0.0652350471365002" fullinertia="1.21479534426735e-05 1.32089620990406e-05 1.4307276815154e-05 -6.01498264167475e-08 -2.7952152890709e-08 -9.55458698193916e-08" />
+                        </body>
+                    </body>
+                </body>
+            </body>
+
+        </body>
+    </worldbody>
+
+    <sensor>
+        <gyro name="imu_ang_vel" site="imu" />
+        <velocimeter name="imu_lin_vel" site="imu" />
+        <accelerometer name="imu_lin_acc" site="imu" />
+        <framezaxis name="imu_upvector" objtype="body" objname="world" reftype="site" refname="imu" />
+        <subtreeangmom name="root_angmom" body="trunk" />
+    </sensor>
+</mujoco>

@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>hexapod_control</name><version>0.1.0</version>
+  <description>Hexapod Estimate policy and simulation PD motor controller.</description>
+  <maintainer email="ch@localhost.localdomain">ch</maintainer><license>BSD-3-Clause</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake_python</buildtool_depend>
+  <depend>controller_interface</depend><depend>hardware_interface</depend>
+  <depend>pluginlib</depend><depend>rclcpp</depend><depend>rclcpp_lifecycle</depend>
+  <depend>realtime_tools</depend><depend>std_msgs</depend>
+  <depend>sensor_msgs</depend><exec_depend>rclpy</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend><exec_depend>std_srvs</exec_depend>
+  <exec_depend>controller_manager_msgs</exec_depend><exec_depend>controller_manager</exec_depend>
+  <exec_depend>hexapod_gazebo</exec_depend><exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-yaml</exec_depend><exec_depend>ament_index_python</exec_depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>

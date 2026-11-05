@@ -1,0 +1,6 @@
+<library path="hexapod_pd_controller">
+  <class name="hexapod_control/PdController" type="hexapod_control::PdController"
+         base_class_type="controller_interface::ControllerInterface">
+    <description>Per-step torque-limited PD servo with a simulation-time watchdog.</description>
+  </class>
+</library>

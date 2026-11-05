@@ -1,0 +1,5 @@
+/gazebo:
+  ros__parameters:
+    # Gazebo Classic 默认 /clock 只有 10 Hz，会使 50 Hz 策略成批执行。
+    # 每个物理步发布时钟，确保 ROS 仿真时间定时器按 20 ms 推进 GRU。
+    publish_rate: 1000.0

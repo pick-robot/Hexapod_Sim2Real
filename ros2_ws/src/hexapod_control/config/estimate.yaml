@@ -1,0 +1,19 @@
+hexapod_estimate_controller:
+  ros__parameters:
+    # 策略文件、63 维观测缩放、action_scale、default_angles 从真机配置读取。
+    # 空值使用 project_root/deploy/deploy_real/configs/hexapod_estimate.yaml。
+    real_config: ''
+    policy_path: ''
+    # 仿真默认先站立，避免没有真机吊架时在零力矩状态下倒下。
+    # 改为 zero 可完整复现真机启动：Y→默认姿态、A→策略。
+    initial_mode: default
+    gamepad: true
+    stand_duration: 2.0
+    stand_kp: 150.0
+    stand_kd: 11.0
+    policy_kp: 100.0
+    policy_kd: 3.0
+    damping_kd: 11.0
+    command_timeout: 0.5
+    sensor_timeout: 0.1
+    log_csv: true

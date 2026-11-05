@@ -16,6 +16,11 @@
 
 ## 2. 目录结构
 
+新增 ROS 2 / Gazebo 模型导入工作空间：使用说明见 [ros2_ws/README.md](ros2_ws/README.md)。
+已将 `hexapod/` 中的纯六足模型导入 Gazebo，并接入与
+`deploy_real_hexapod_estimate.py` 相同的 Estimate 策略，支持手柄、键盘和 ROS 速度控制。
+启动命令：`cd ros2_ws && ./scripts/launch_estimate.sh`，详细参数和按键见工作空间 README。
+
 | 路径 | 用途 |
 | --- | --- |
 | `deploy/deploy_real/` | 实机部署主程序、配置读取、数据记录和离线工具。 |

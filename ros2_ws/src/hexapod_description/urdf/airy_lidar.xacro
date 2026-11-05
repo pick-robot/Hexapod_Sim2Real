@@ -1,0 +1,90 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <!-- 独立于 MJCF 转换结果，重新导入机器人时保留雷达安装配置。 -->
+  <xacro:arg name="use_airy" default="true" />
+  <xacro:arg name="airy_horizontal_samples" default="900" />
+  <xacro:arg name="airy_vertical_samples" default="96" />
+
+  <xacro:if value="$(arg use_airy)">
+    <!-- 相对 trunk：机身前沿约 x=0.50 m，再向前 0.25 m。
+         R_y(pi/2) 将雷达 +Z 映射到机体 +X，+X 映射到机体 -Z。
+         原点取雷达底座中心；未指定高度，先与 trunk 原点等高。 -->
+    <joint name="airy_mount_joint" type="fixed">
+      <parent link="trunk" />
+      <child link="airy_link" />
+      <origin xyz="0.75 0 0" rpy="0 ${pi/2} 0" />
+    </joint>
+    <link name="airy_link">
+      <!-- 按官方 0.23 kg、直径 60 mm、高 63 mm 近似为均匀圆柱。
+           惯量不是厂家实测值；外观使用圆柱与球面近似，没有使用官方 CAD。 -->
+      <inertial>
+        <origin xyz="0 0 0.0315" rpy="0 0 0" />
+        <mass value="0.23" />
+        <inertia ixx="0.0001278225" iyy="0.0001278225" izz="0.0001035"
+                 ixy="0" ixz="0" iyz="0" />
+      </inertial>
+      <visual name="airy_base">
+        <origin xyz="0 0 0.0165" rpy="0 0 0" />
+        <geometry><cylinder radius="0.03" length="0.033" /></geometry>
+        <material name="airy_base_gray"><color rgba="0.22 0.24 0.26 1" /></material>
+      </visual>
+      <visual name="airy_cover">
+        <origin xyz="0 0 0.033" rpy="0 0 0" />
+        <geometry><sphere radius="0.03" /></geometry>
+        <material name="airy_cover_black"><color rgba="0.025 0.03 0.04 1" /></material>
+      </visual>
+      <!-- 碰撞体只覆盖底座，避免理想扫描射线击中自己的透明保护罩。 -->
+      <collision name="airy_link_base_collision">
+        <origin xyz="0 0 0.012" rpy="0 0 0" />
+        <geometry><cylinder radius="0.03" length="0.024" /></geometry>
+      </collision>
+    </link>
+
+    <!-- 理想扫描中心暂取底座沿本地 Z 偏移 33 mm；非实机光学标定值。
+         单独发布 TF，确保点云原点与射线原点一致；轴向与 airy_link 相同。 -->
+    <joint name="airy_scan_joint" type="fixed">
+      <parent link="airy_link" />
+      <child link="airy_scan" />
+      <origin xyz="0 0 0.033" rpy="0 0 0" />
+    </joint>
+    <link name="airy_scan" />
+    <gazebo reference="airy_mount_joint">
+      <preserveFixedJoint>true</preserveFixedJoint>
+    </gazebo>
+    <gazebo reference="airy_link">
+      <selfCollide>false</selfCollide>
+      <sensor name="airy_lidar" type="ray">
+        <pose>0 0 0.033 0 0 0</pose>
+        <always_on>true</always_on>
+        <update_rate>10</update_rate>
+        <visualize>false</visualize>
+        <ray>
+          <scan>
+            <!-- Airy 本地 +Z 方向为半球中心：方位 360°、仰角 0~90°。
+                 900 个方位样本对应 0.4°，去掉 0°/360°重复端点。
+                 安装后半球覆盖机器人前方，不是全向水平扫描。 -->
+            <horizontal>
+              <samples>$(arg airy_horizontal_samples)</samples>
+              <resolution>1</resolution>
+              <min_angle>0</min_angle>
+              <max_angle>${2*pi*(1-1/int('$(arg airy_horizontal_samples)'))}</max_angle>
+            </horizontal>
+            <vertical>
+              <samples>$(arg airy_vertical_samples)</samples>
+              <resolution>1</resolution>
+              <min_angle>0</min_angle>
+              <max_angle>${pi/2}</max_angle>
+            </vertical>
+          </scan>
+          <range><min>0.1</min><max>60</max><resolution>0.01</resolution></range>
+          <noise><type>gaussian</type><mean>0</mean><stddev>0.015</stddev></noise>
+        </ray>
+        <plugin name="airy_pointcloud" filename="libgazebo_ros_ray_sensor.so">
+          <ros><remapping>~/out:=/airy/points</remapping></ros>
+          <output_type>sensor_msgs/PointCloud2</output_type>
+          <frame_name>airy_scan</frame_name>
+        </plugin>
+      </sensor>
+    </gazebo>
+  </xacro:if>
+</robot>

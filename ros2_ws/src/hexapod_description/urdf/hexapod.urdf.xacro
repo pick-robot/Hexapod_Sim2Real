@@ -1125,4 +1125,5 @@
   <gazebo reference="LB_FOOT_fixed">
     <preserveFixedJoint>true</preserveFixedJoint>
   </gazebo>
+  <xacro:include filename="airy_lidar.xacro" />
 </robot>

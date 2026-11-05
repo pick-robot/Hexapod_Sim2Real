@@ -57,11 +57,17 @@ def generate_launch_description():
         DeclareLaunchArgument('gamepad', default_value='true'),
         DeclareLaunchArgument('log_csv', default_value='true'),
         DeclareLaunchArgument('gui', default_value='true'),
+        DeclareLaunchArgument('use_airy', default_value='true'),
+        DeclareLaunchArgument('airy_horizontal_samples', default_value='900'),
+        DeclareLaunchArgument('airy_vertical_samples', default_value='96'),
         IncludeLaunchDescription(PythonLaunchDescriptionSource(str(
             Path(get_package_share_directory('hexapod_gazebo')) / 'launch' / 'gazebo.launch.py')),
             launch_arguments={
                 'gui': LaunchConfiguration('gui'), 'paused': 'true', 'use_ros2_control': 'true',
                 'controllers_file': str(share / 'config' / 'controllers.yaml'),
+                'use_airy': LaunchConfiguration('use_airy'),
+                'airy_horizontal_samples': LaunchConfiguration('airy_horizontal_samples'),
+                'airy_vertical_samples': LaunchConfiguration('airy_vertical_samples'),
             }.items()),
         RegisterEventHandler(OnProcessExit(target_action=spawner, on_exit=after_configure)),
         spawner,

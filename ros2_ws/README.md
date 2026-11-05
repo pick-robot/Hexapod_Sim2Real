@@ -67,6 +67,68 @@ ros2 launch hexapod_gazebo gazebo.launch.py
 此入口仅查看模型，不加载站立控制；点击播放后模型会受重力下落、关节自由运动。
 需要行走时使用上面的 `launch_estimate.sh` 控制入口。
 
+## RoboSense Airy 三维激光雷达
+
+模型默认带一个 Airy 雷达，配置位于
+[`airy_lidar.xacro`](src/hexapod_description/urdf/airy_lidar.xacro)。
+位置按**机身前沿再向前约 25 cm**设置：机身 STL 前沿约为 `x=0.5025 m`，
+雷达底座中心相对 `trunk/base_link` 为 `(0.75, 0, 0) m`。
+高度暂取与机体原点等高；站立初始状态约距地面 0.313 m。
+这是固定安装关系，暂未建模实体安装支架及其质量。
+
+安装关节为 `airy_mount_joint`，`rpy=(0, pi/2, 0)`：
+
+| 雷达坐标轴 | 对应机体方向 |
+| --- | --- |
+| `+X` | 下方（机体 `-Z`） |
+| `+Y` | 左方（机体 `+Y`） |
+| `+Z` | 正前方（机体 `+X`） |
+
+按 [RoboSense Airy 官方手册](https://robosense-robotics.github.io/product-manual/en/Airy/)
+的 96 线版本设置：本地水平方位 360°、仰角 0～90°、10 Hz、量程 0.1～60 m，
+本体直径约 60 mm、高 63 mm、质量 0.23 kg。
+该安装姿态使扫描半球**朝向机器人前方**，不是围绕机器人水平扫描一整圈。
+外观为圆柱和球面近似，惯量为均匀圆柱估算；不是官方 CAD 或实测惯量。
+添加雷达后总质量约为 40.17 kg，固定支架质量未计入。
+
+Gazebo 使用 CPU `ray` 和 `libgazebo_ros_ray_sensor.so` 发布
+`/airy/points`（`sensor_msgs/msg/PointCloud2`）。点云坐标系为 `airy_scan`，
+相对底座坐标系 `airy_link` 沿本地 Z 偏移 0.033 m，轴向一致。
+这个偏移是简化扫描中心，**不是实机标定外参**。
+点云是理想均匀采样模型，包含 XYZ/intensity，不提供实机的逐点时间、ring、
+UDP 数据包、真实反射率、帧缺口和多回波；未添加 Airy 内置 IMU。
+现有策略仍使用机体 `/imu/data`。
+
+重新构建并重启 Gazebo 后生效：
+
+```bash
+source /opt/ros/humble/setup.bash
+cd /home/ch/Hexapod_Sim2Real/ros2_ws
+colcon build --symlink-install
+source install/setup.bash
+ros2 launch hexapod_control estimate.launch.py
+```
+
+查看接口与安装 TF（仿真播放时才持续发布点云）：
+
+```bash
+ros2 topic info /airy/points
+ros2 topic hz /airy/points
+ros2 run tf2_ros tf2_echo base_link airy_scan
+```
+
+RViz 中将 Fixed Frame 设为 `base_link`，添加 `PointCloud2`，
+选择 `/airy/points`，Reliability 可设为 Best Effort。
+默认每帧采样 `900 × 96` 条射线，CPU 负载较高时可降低采样数：
+
+```bash
+ros2 launch hexapod_control estimate.launch.py airy_horizontal_samples:=360 airy_vertical_samples:=32
+```
+
+导入入口 `hexapod_gazebo gazebo.launch.py` 支持相同参数。
+两个入口均可传 `use_airy:=false` 恢复不带雷达的基础模型。
+雷达配置独立于 MJCF 生成文件，重新运行导入脚本后会继续保留。
+
 ## 文件与数据接口
 
 - `src/hexapod_description/`：完整的 25 个 STL、Xacro、质量和惯性、碰撞体。
@@ -74,6 +136,7 @@ ros2 launch hexapod_gazebo gazebo.launch.py
 - `/joint_states`：18 个关节的位置/速度；顺序为
   `RF/RM/RB/LF/LM/LB`，每腿 `HAA/HFE/KFE`。
 - `/imu/data`：200 Hz 机体 IMU，坐标系 `trunk`，与源 MJCF 的 `imu` site 重合。
+- `/airy/points`：10 Hz Airy 简化三维点云，坐标系 `airy_scan`。
 - `/gazebo/model_states`、`/gazebo/link_states`：模型和连杆世界位姿。
 - `/robot_description`、`/tf`、`/tf_static`、`/clock`：描述、坐标变换和仿真时间。
 - 控制入口另外发布 `/hexapod/state`、`/hexapod/policy_action`、`/hexapod/observation`。
@@ -122,13 +185,14 @@ Gazebo 启动只依赖已生成的描述，无需安装 MuJoCo 或 MJLab。
 ```bash
 cd /home/ch/Hexapod_Sim2Real
 /home/ch/mujoco_ws/mjlab/.venv/bin/python ros2_ws/scripts/import_mjcf.py
-xacro ros2_ws/src/hexapod_description/urdf/hexapod.urdf.xacro > /tmp/hexapod.urdf
+xacro ros2_ws/src/hexapod_description/urdf/hexapod.urdf.xacro use_airy:=false > /tmp/hexapod.urdf
 /home/ch/mujoco_ws/mjlab/.venv/bin/python ros2_ws/scripts/check_model_conversion.py /tmp/hexapod.urdf
 cd ros2_ws
 colcon build --symlink-install
 ```
 
-转换检查会对比 MuJoCo 和 URDF 在零位及 20 组非零关节位姿下的连杆、
+转换检查临时关闭附加雷达，只比较源 MJCF 的机器人本体。
+它会对比 MuJoCo 和 URDF 在零位及 20 组非零关节位姿下的连杆、
 视觉网格与碰撞体，核对各刚体质量/惯性、关节方向/限位和网格哈希。
 初始位置、初始关节值或关节集合变化后，还应同步更新启动参数和导入检查脚本。
 

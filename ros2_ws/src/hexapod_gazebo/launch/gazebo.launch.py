@@ -20,6 +20,9 @@ def launch_robot(context):
             'mesh_prefix': 'file://' + os.path.join(description_share, 'meshes'),
             'use_ros2_control': use_control,
             'controllers_file': LaunchConfiguration('controllers_file').perform(context),
+            'use_airy': LaunchConfiguration('use_airy').perform(context),
+            'airy_horizontal_samples': LaunchConfiguration('airy_horizontal_samples').perform(context),
+            'airy_vertical_samples': LaunchConfiguration('airy_vertical_samples').perform(context),
         },
     ).toxml()
     return [
@@ -43,6 +46,9 @@ def generate_launch_description():
     gazebo_share = get_package_share_directory('hexapod_gazebo')
     return LaunchDescription([
         DeclareLaunchArgument('gui', default_value='true'),
+        DeclareLaunchArgument('use_airy', default_value='true'),
+        DeclareLaunchArgument('airy_horizontal_samples', default_value='900'),
+        DeclareLaunchArgument('airy_vertical_samples', default_value='96'),
         DeclareLaunchArgument('paused', default_value='true',
                               description='Pause physics to inspect the uncontrolled model.'),
         DeclareLaunchArgument('use_ros2_control', default_value='false',
